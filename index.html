@@ -1,0 +1,1867 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three Lune - Gestão</title>
+    <script>
+        async function checkAuth() {
+            try {
+                // CORREÇÃO: credentials include é essencial para sessões PHP
+                const response = await fetch('api.php?resource=auth&action=check', { credentials: 'include' });
+                if (response.status === 401) {
+                    window.location.href = 'login.html';
+                } else {
+                    const data = await response.json();
+                    if(data.user) {
+                        // Desktop Info (IDs originais)
+                        const desktopCompany = document.getElementById('user-company-name');
+                        const desktopUser = document.getElementById('user-name');
+                        if (desktopCompany) desktopCompany.textContent = data.user.company;
+                        if (desktopUser) desktopUser.textContent = data.user.name;
+
+                        // Mobile Info (Novos IDs para layout compacto - CORREÇÃO DO BUG)
+                        const mobileCompany = document.getElementById('user-company-name-mobile');
+                        const mobileUser = document.getElementById('user-name-mobile');
+                        if (mobileCompany) mobileCompany.textContent = data.user.company;
+                        if (mobileUser) mobileUser.textContent = data.user.name;
+                    }
+                    document.body.classList.remove('hidden'); 
+                }
+            } catch (e) {
+                console.error("Erro auth", e);
+                // Em caso de falha de rede ou servidor, redireciona por segurança ou exibe erro
+                // window.location.href = 'login.html'; 
+            }
+        }
+        window.addEventListener('load', checkAuth);
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8f9fa; }
+        body.hidden { display: none; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: var(--primary-color, #dc2626); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { filter: brightness(0.8); }
+        
+        /* Estilos base para os botões de aba (limpos do estilo de lista da v16) */
+        .tab-btn {
+            @apply text-gray-500 hover:text-gray-800 border-b-2 border-transparent;
+            transition: all 0.2s;
+        }
+
+        /* Estilo para aba ativa no DESKTOP */
+        @media (min-width: 768px) {
+            .tab-btn.active { 
+                border-bottom-width: 2px; 
+                border-color: var(--primary-color, #dc2626) !important; 
+                color: var(--primary-color, #dc2626) !important; 
+            }
+        }
+        /* FIM DO ESTILO PARA O MENU DE ABAS */
+
+        .card { box-shadow: 0 2px 5px rgba(0,0,0,0.05); border: 1px solid #e5e7eb; }
+        
+        .theme-bg { background-color: var(--primary-color, #dc2626) !important; }
+        .theme-bg:hover { filter: brightness(0.9); }
+        .theme-text { color: var(--primary-color, #dc2626) !important; }
+        .theme-border { border-color: var(--primary-color, #dc2626) !important; }
+        .theme-ring:focus { --tw-ring-color: var(--primary-color, #dc2626) !important; }
+
+        @media print {
+            body { background-color: white; margin: 0; -webkit-print-color-adjust: exact; }
+            #app, header, nav, .tab-content, #generic-modal, #project-detail-modal, #proposal-modal, #invoice-upload-modal, .filters-bar, #settings-btn, #grouped-payment-modal { display: none !important; }
+            #report-print-view, #proposal-content-print-area { display: block !important; position: static; width: 100%; margin: 0; padding: 0; background: white; }
+            /* CORREÇÃO v14: Reintroduz padding/margem de segurança para impressão A4 */
+            #proposal-content-print-area > div { 
+                box-shadow: none !important; 
+                border: none !important; 
+                padding: 40px !important; /* Adiciona padding para garantir margem na folha impressa */
+                margin: 0 !important;
+                max-width: 100% !important;
+            }
+            .report-table { width: 100%; border-collapse: collapse; margin-top: 5px; font-size: 10pt; }
+            .report-table th { background-color: #f3f4f6 !important; color: #111 !important; font-weight: bold; border: 1px solid #ccc; padding: 8px; }
+            .report-table td { border: 1px solid #ccc; padding: 8px; }
+            .report-header-logo { width: 150px; }
+            .report-month-header { margin-top: 20px; margin-bottom: 10px; border-bottom: 2px solid #000; padding-bottom: 5px; font-size: 14pt; font-weight: bold; color: #000; text-transform: uppercase; }
+        }
+
+        /* V22: Força o escalonamento do conteúdo da proposta/relatório em telas pequenas */
+        @media (max-width: 767px) {
+            #proposal-modal #proposal-content > div, #report-print-view > div {
+                transform: scale(0.65); /* Reduz a escala para 65% em telas menores que 768px */
+                transform-origin: top center; /* Garante que o zoom comece do topo */
+                width: 155%; /* Compensa a redução de escala para centralizar o conteúdo */
+                max-width: 155%;
+                margin-left: -27.5%; /* Move o conteúdo para a esquerda para centralizar o zoom */
+            }
+            /* V22: Remove a barra de rolagem horizontal desnecessária na modal */
+            #proposal-modal > div {
+                 overflow-x: hidden;
+            }
+        }
+
+        /* CORREÇÃO V24: Estilos para o seletor de projetos contábeis */
+        #accounting-project-selector {
+            position: relative;
+        }
+
+        #accounting-project-selector .sticky-header {
+            position: sticky;
+            top: 0;
+            background: white;
+            z-index: 10;
+            padding: 12px;
+            margin: -12px -12px 12px -12px;
+            border-bottom: 1px solid #e5e7eb;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        /* Garante que o conteúdo role corretamente abaixo do header fixo */
+        #accounting-project-selector .scroll-content {
+            max-height: 384px; /* Ajustado para compensar o header fixo */
+            overflow-y: auto;
+            padding-top: 4px;
+        }
+
+        /* Ajustes mobile para o seletor contábil */
+        @media (max-width: 767px) {
+            #accounting-project-selector .sticky-header {
+                padding: 10px;
+                margin: -10px -10px 10px -10px;
+            }
+            
+            #accounting-project-selector .scroll-content {
+                max-height: 300px;
+            }
+            
+            #accounting-project-selector {
+                max-height: 70vh; /* Limita a altura em mobile */
+            }
+        }
+    </style>
+</head>
+<body class="min-h-screen text-gray-800 hidden">
+    
+    <div id="report-print-view" class="hidden"></div>
+    <div id="proposal-content-print-area" class="hidden"></div>
+
+    <button id="settings-btn" onclick="openSettingsModal()" class="fixed bottom-5 right-5 bg-gray-800 text-white p-3 rounded-full shadow-lg hover:bg-gray-700 transition z-50" title="Configurações">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+    </button>
+
+    <div id="app" class="p-6 md:p-8 max-w-7xl mx-auto">
+        <header class="mb-6 border-b border-gray-200 pb-4 md:pb-6">
+            
+            <div class="flex justify-between items-center md:hidden">
+                <div class="flex items-center w-full">
+                    <div class="flex-shrink-0">
+                        <img id="app-logo-mobile" src="logogenerico.png" onerror="this.src='https://placehold.co/200x60/000000/FFFFFF/png?text=SUA+LOGO+AQUI'" alt="Logo do Sistema" class="h-12 object-contain transition-all duration-300">
+                    </div>
+                    
+                    <div id="mobile-compact-info" class="pl-3 ml-3 border-l border-gray-300 flex flex-col flex-grow items-start justify-center min-w-0">
+                         <div class="flex justify-between items-center w-full">
+                             <div class="leading-none flex-grow">
+                                 <p id="user-company-name-mobile" class="text-sm font-bold text-gray-900 uppercase tracking-wide truncate">THREEUNE AUDIOVISUAL</p>
+                                 <p id="user-name-mobile" class="text-xs text-gray-500 truncate">Cassio Santos</p>
+                             </div>
+                             <button onclick="logout()" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-1 px-3 rounded transition flex-shrink-0 ml-2">
+                                Sair
+                             </button>
+                         </div>
+                         <p class="text-gray-500 text-xs uppercase tracking-wider font-semibold mt-1">Painel de Gestão</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="hidden md:flex md:flex-row md:justify-between md:items-end">
+                <div class="mb-0">
+                    <img id="app-logo-desktop" src="logogenerico.png" onerror="this.src='https://placehold.co/200x60/000000/FFFFFF/png?text=SUA+LOGO+AQUI'" alt="Logo do Sistema" class="object-contain transition-all duration-300">
+                </div>
+                
+                <div class="text-right flex flex-col items-end gap-1">
+                    <button onclick="logout()" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-1 px-3 rounded transition flex-shrink-0">
+                        Sair
+                    </button>
+
+                    <div id="desktop-user-info">
+                        <div class="text-right">
+                             <p id="user-company-name" class="text-sm font-bold text-gray-900 uppercase tracking-wide leading-tight"></p>
+                            <p id="user-name" class="text-xs text-gray-500"></p>
+                        </div>
+                        <p class="text-gray-500 text-sm uppercase tracking-wider font-semibold">Painel de Gestão</p>
+                    </div>
+                    
+                    <div id="loading-indicator" class="mt-2 text-xs theme-text font-bold hidden animate-pulse">● Sincronizando...</div>
+                </div>
+            </div>
+        </header>
+
+        <nav class="border-b border-gray-200 mb-6 md:mb-8 pb-0">
+            <select id="mobile-tab-select" onchange="switchTab(this.value)" class="block w-full md:hidden border border-gray-300 rounded-lg p-3 text-sm bg-white mb-2 font-medium">
+                <option value="dashboard">Dashboard</option>
+                <option value="projects">Projetos/Freelas</option>
+                <option value="clients">Clientes</option>
+                <option value="suppliers">Fornecedores</option>
+                <option value="services">Catálogo</option>
+                <option value="proposals">Orçamentos/Cotações</option>
+                <option value="accounting">Relatório Contábil</option>
+            </select>
+            
+            <div id="desktop-tabs-container" class="hidden md:flex md:space-x-6">
+                <button id="tab-dashboard" class="tab-btn py-3 px-2 font-medium text-sm transition active" onclick="switchTab('dashboard')">Dashboard</button>
+                <button id="tab-projects" class="tab-btn py-3 px-2 font-medium text-sm transition" onclick="switchTab('projects')">Projetos/Freelas</button>
+                <button id="tab-clients" class="tab-btn py-3 px-2 font-medium text-sm transition" onclick="switchTab('clients')">Clientes</button>
+                <button id="tab-suppliers" class="tab-btn py-3 px-2 font-medium text-sm transition" onclick="switchTab('suppliers')">Fornecedores</button>
+                <button id="tab-services" class="tab-btn py-3 px-2 font-medium text-sm transition" onclick="switchTab('services')">Catálogo</button>
+                <button id="tab-proposals" class="tab-btn py-3 px-2 font-medium text-sm transition" onclick="switchTab('proposals')">Orçamentos/Cotações</button> 
+                <button id="tab-accounting" class="tab-btn py-3 px-2 font-medium text-sm transition" onclick="switchTab('accounting')">Relatório Contábil</button>
+            </div>
+        </nav>
+
+        <div id="content-dashboard" class="tab-content animate-fade-in">
+             <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl md:text-2xl font-bold text-gray-900 flex-shrink-0">Resumo Financeiro (Líquido)</h2>
+                <p class="text-xs text-gray-500 hidden md:block">Valores já descontando despesas operacionais</p>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-8">
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-20 h-20 theme-bg opacity-10 rounded-bl-full -mr-4 -mt-4"></div>
+                    <p class="text-sm font-bold text-gray-500 uppercase tracking-wider mb-1">Lucro (Mês Atual)</p>
+                    <h3 id="dash-month-total" class="text-3xl font-extrabold theme-text">R$ 0,00</h3>
+                    <p class="text-xs text-gray-400 mt-2">Entradas - Saídas (Este Mês)</p>
+                </div>
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-20 h-20 bg-green-600 opacity-10 rounded-bl-full -mr-4 -mt-4"></div>
+                    <p class="text-sm font-bold text-gray-500 uppercase tracking-wider mb-1">Lucro (Ano Atual)</p>
+                    <h3 id="dash-year-total" class="text-3xl font-extrabold text-green-600">R$ 0,00</h3>
+                    <p class="text-xs text-gray-400 mt-2">Acumulado Líquido (Este Ano)</p>
+                </div>
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-20 h-20 bg-blue-600 opacity-10 rounded-bl-full -mr-4 -mt-4"></div>
+                    <p class="text-sm font-bold text-gray-500 uppercase tracking-wider mb-1">Projetos Ativos</p>
+                    <h3 id="dash-active-projects" class="text-3xl font-extrabold text-blue-600">0</h3>
+                    <p class="text-xs text-gray-400 mt-2">Em andamento, pendentes ou aguardando pgto</p>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <h3 class="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Lucro Líquido por Cliente (Ano Atual)</h3>
+                    <div class="relative h-80 w-full"><canvas id="clientsChart"></canvas></div>
+                </div>
+                
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+                    <h3 class="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Extrato do Mês Atual</h3>
+                    <div class="overflow-y-auto flex-1 pr-2" style="max-height: 320px;">
+                        <table class="w-full text-sm text-left">
+                            <thead class="bg-gray-50  text-xs text-gray-500 uppercase sticky top-0">
+                                <tr>
+                                    <th class="px-3 py-2">Data</th>
+                                    <th class="px-3 py-2">Projeto</th>
+                                    <th class="px-3 py-2 text-right">Valor</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dashboard-statement-body" class="divide-y divide-gray-100">
+                                </tbody>
+                        </table>
+                    </div>
+                    <p class="text-xs text-gray-400 mt-3 text-center">Clique no item para ir ao projeto.</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="content-projects" class="tab-content hidden">
+            <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+                <h2 class="text-2xl font-bold text-gray-900 flex-shrink-0">Fluxo de Trabalho</h2>
+                <div class="flex flex-wrap justify-end gap-2 w-full md:w-auto">
+                    <button onclick="openGroupedPaymentModal()" class="bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 px-3 rounded-lg shadow-sm transition flex items-center text-xs sm:text-sm w-full sm:w-auto">
+                         <svg class="w-4 h-4 mr-1 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                        <span class="truncate">Recebimento Consolidado</span>
+                    </button>
+                    <button onclick="syncGoogleCalendar()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg shadow-sm transition flex items-center text-xs sm:text-sm w-full sm:w-auto">
+                        <svg class="w-4 h-4 mr-1 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> 
+                        <span class="truncate">Sync Agenda</span>
+                    </button>
+                    <button onclick="openProjectModal(null)" class="theme-bg text-white font-bold py-2 px-3 rounded-lg shadow-sm transition flex items-center text-xs sm:text-sm w-full sm:w-auto">
+                        <svg class="w-4 h-4 mr-1 sm:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg> Novo
+                    </button>
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-8 filters-bar">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">Buscar</label><input type="text" id="filter-search" oninput="applyFilters()" placeholder="Nome..." class="w-full border border-gray-300 rounded p-2 text-sm"></div>
+                    <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">Mês</label><input type="month" id="filter-month" onchange="applyFilters()" class="w-full border border-gray-300 rounded p-2 text-sm"></div>
+                    <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">Cliente</label><select id="filter-client" onchange="applyFilters()" class="w-full border border-gray-300 rounded p-2 text-sm bg-white"><option value="">Todos</option></select></div>
+                    <div><label class="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo</label><select id="filter-type" onchange="applyFilters()" class="w-full border border-gray-300 rounded p-2 text-sm bg-white"><option value="">Todos</option><option value="Freela">Freela</option><option value="Projeto Audiovisual">Projeto Audiovisual</option></select></div>
+                </div>
+            </div>
+            <div id="projects-list" class="space-y-8"></div>
+        </div>
+
+        <div id="content-clients" class="tab-content hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">Clientes</h2>
+                <button onclick="openClientModal(null)" class="bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-4 rounded-lg shadow">Novo Cliente</button>
+            </div>
+            <div id="clients-list" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+        </div>
+        
+        <div id="content-suppliers" class="tab-content hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">Fornecedores</h2>
+                <button onclick="openSupplierModal(null)" class="bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-4 rounded-lg shadow">Novo Fornecedor</button>
+            </div>
+            <div id="suppliers-list" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+        </div>
+
+        <div id="content-services" class="tab-content hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">Catálogo</h2>
+                <button onclick="openServiceModal(null)" class="bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-4 rounded-lg shadow">Novo Item</button>
+            </div>
+            <div id="services-list" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+        </div>
+        
+        <div id="content-proposals" class="tab-content hidden">
+             <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-900">Orçamentos Independentes</h2>
+                <button onclick="openQuoteModal(null)" class="theme-bg text-white font-bold py-2.5 px-4 rounded-lg shadow-sm transition flex items-center text-sm">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg> Novo Orçamento
+                </button>
+            </div>
+            <div id="quotes-list" class="space-y-4 p-6 bg-white rounded-xl card border border-gray-200">
+                </div>
+        </div>
+        
+        <div id="content-accounting" class="tab-content hidden p-4 md:p-6 bg-white rounded-xl card border border-gray-200">
+            <div class="flex flex-col items-start md:flex-row md:justify-between md:items-center mb-4 gap-2">
+                <h2 class="text-xl font-bold text-gray-800">Relatório Contábil</h2>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm font-bold text-gray-600">Filtrar Mês (Opcional):</label>
+                    <input type="month" id="accounting-month-filter" onchange="renderAccountingProjectSelector(window.currentProjects)" class="border border-gray-300 rounded p-2 text-sm">
+                </div>
+            </div>
+            <div id="accounting-project-selector" class="space-y-3 p-4 border rounded-lg bg-gray-50 max-h-96 overflow-y-auto relative"></div>
+            <div class="mt-6 flex space-space-x-3">
+                <button onclick="generateAccountingReportPDF()" class="theme-bg text-white font-bold py-3 px-6 rounded-lg shadow transition">Gerar Relatório (PDF)</button>
+                <button onclick="exportAccountingData()" class="bg-gray-800 hover:bg-gray-900 text-white font-bold py-3 px-6 rounded-lg shadow transition">Exportar JSON</button>
+            </div>
+            <pre id="accounting-data-output" class="mt-6 bg-gray-900 text-green-400 p-4 rounded-lg text-sm overflow-x-auto h-64 hidden"></pre>
+        </div>
+    </div>
+
+    <div id="generic-modal" class="fixed inset-0 bg-gray-900 bg-opacity-80 hidden items-center justify-center p-4 z-[60]">
+        <div id="modal-content-container" class="bg-white rounded-xl shadow-2xl w-full max-w-sm sm:max-w-lg md:max-w-3xl max-h-[90vh] overflow-y-auto transform transition-all"></div>
+    </div>
+
+    <div id="settings-modal" class="fixed inset-0 bg-gray-900 bg-opacity-80 hidden items-center justify-center p-4 z-[100]">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg md:max-w-2xl max-h-[95vh] overflow-y-auto transform transition-all p-6">
+            <div class="flex justify-between items-start mb-6 border-b pb-4">
+                <h3 id="settings-modal-title" class="text-xl font-bold text-gray-900">Configurações do Sistema</h3>
+                <button onclick="closeSettingsModal()" class="text-gray-400 hover:text-gray-600"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <form id="settings-form" onsubmit="saveSettings(event)">
+                <div class="mb-5 border-b pb-4">
+                    <h4 class="text-lg font-bold text-gray-800 mb-4">Aparência</h4>
+                    <div class="flex flex-col md:flex-row md:space-x-6 items-center">
+                        <div><label class="block text-sm font-bold text-gray-700 mb-2">Cor Principal</label><input type="color" id="setting-color" name="primaryColor" class="h-10 w-20 border border-gray-300 rounded cursor-pointer"></div>
+                        <div class="flex-1 mt-4 md:mt-0"><label class="block text-sm font-bold text-gray-700 mb-2">Logo</label><input type="file" id="setting-logo-file" accept="image/*" class="block w-full text-sm text-gray-500 mb-2 cursor-pointer"><input type="text" id="setting-logo-url" name="logoUrl" placeholder="Ou URL..." class="w-full border border-gray-300 rounded-lg p-2 text-sm"></div>
+                    </div>
+                    <div class="mt-4"><label class="block text-sm font-bold text-gray-700 mb-2">Tamanho Logo (Desktop)</label><div class="flex items-center space-x-4"><input type="range" id="setting-logo-size" name="logoSize" min="30" max="150" step="5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"><span id="logo-size-display" class="text-sm font-bold text-gray-700 w-12 text-right">80px</span></div></div>
+                </div>
+                
+                <div class="mb-5 border-b pb-4">
+                    <h4 class="text-lg font-bold text-gray-800 mb-4">Dados de Contato (Proposta/Relatório)</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="col-span-1 md:col-span-2"><label class="block text-sm font-bold text-gray-700 mb-1">Título da Empresa no Cabeçalho</label><input type="text" name="headerTitle" placeholder="Ex: Nome da Sua Empresa" class="w-full border border-gray-300 rounded-lg p-2 text-sm"></div>
+                        <div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">CNPJ/Documento</label><input type="text" name="headerDocument" placeholder="Ex: 00.000.000/0001-00" class="w-full border border-gray-300 rounded-lg p-2 text-sm"></div>
+                        <div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Rede Social/Handle</label><input type="text" name="headerSocial" placeholder="Ex: @seuhandle" class="w-full border border-gray-300 rounded-lg p-2 text-sm"></div>
+                        <div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Telefone Principal</label><input type="text" name="headerPhone1" placeholder="Ex: (11) 90000-0000" class="w-full border border-gray-300 rounded-lg p-2 text-sm"></div>
+                        <div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Telefone Secundário</label><input type="text" name="headerPhone2" placeholder="Ex: (11) 90000-0000" class="w-full border border-gray-300 rounded-lg p-2 text-sm"></div>
+                        <div class="col-span-1 md:col-span-2"><label class="block text-sm font-bold text-gray-700 mb-1">Email do Cabeçalho</label><input type="email" name="headerEmail" placeholder="Ex: contato@suaempresa.com" class="w-full border border-gray-300 rounded-lg p-2 text-sm"></div>
+                        <div class="col-span-1 md:col-span-2"><label class="block text-sm font-bold text-gray-700 mb-1">Subtítulo/Slogan (Acima do Logo)</label><input type="text" name="headerSlogan" placeholder="Ex: SLOGAN DA EMPRESA" class="w-full border border-gray-300 rounded-lg p-2 text-sm"></div>
+                    </div>
+                </div>
+                
+                <div class="mb-6">
+                    <h4 class="text-lg font-bold text-gray-800 mb-4">Integrações</h4>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Google Agenda (iCal)</label>
+                    <input type="text" id="setting-ical-url" name="icalUrl" placeholder="https://calendar.google.com/..." class="w-full border border-gray-300 rounded-lg p-2 text-sm">
+                </div>
+                
+                <div class="flex justify-end space-x-3 pt-4 border-t"><button type="button" onclick="resetSettings()" class="text-gray-500 hover:text-gray-700 text-sm font-medium px-4 py-2">Restaurar</button><button type="submit" class="bg-gray-800 text-white px-6 py-2 rounded-lg font-bold shadow hover:bg-gray-900 transition">Salvar</button></div>
+            </form>
+        </div>
+    </div>
+
+    <div id="project-detail-modal" class="fixed inset-0 bg-gray-900 bg-opacity-80 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-xl md:max-w-4xl lg:max-w-5xl max-h-[90vh] overflow-y-auto p-6 md:p-8">
+            <div class="flex justify-between items-start border-b border-gray-200 pb-4 mb-6">
+                <h3 id="detail-project-title" class="text-2xl font-bold text-gray-900">Detalhes</h3>
+                <button onclick="closeDetailModal()" class="text-gray-400 hover:text-red-600 transition"><svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <div id="detail-project-content" class="space-y-8"></div>
+            <div class="mt-10 pt-6 border-t border-gray-200 flex justify-end items-center">
+                <button onclick="openProjectModal(window.currentDetailProjectId)" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-6 rounded-lg transition">Editar Dados</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="proposal-modal" class="fixed inset-0 bg-gray-900 bg-opacity-80 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg md:max-w-3xl lg:max-w-4xl max-h-[95vh] overflow-y-auto p-4 md:p-8">
+            <div class="flex justify-between items-start border-b border-gray-200 pb-4 mb-4">
+                <h3 id="proposal-title" class="text-2xl font-bold text-gray-900">Visualização do Orçamento</h3>
+                <button onclick="closeProposalModal()" class="text-gray-400 hover:text-red-600 transition"><svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <div id="proposal-actions" class="flex flex-wrap justify-between items-center mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 gap-3">
+                </div>
+            <div class="overflow-x-auto bg-white p-4 rounded-lg border border-gray-200"><div id="proposal-content" class="text-gray-800"></div></div>
+            <div class="flex justify-end mt-6">
+                <button onclick="printProposal()" class="theme-bg text-white font-bold py-3 px-6 rounded-lg shadow flex items-center">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2v5h-16v-5h2v-2h-3v-4h14v4h-3v2h-2zM9 1l-1 1-1 1m6-3l1 1 1 1m-3-1l-3 3"></path></svg> Imprimir / PDF
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="grouped-payment-modal" class="fixed inset-0 bg-gray-900 bg-opacity-80 hidden items-center justify-center p-4 z-[70]">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md md:max-w-xl max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-start mb-6 border-b pb-4">
+                <h3 id="grouped-payment-modal-title" class="text-xl font-bold text-gray-900">Registrar Recebimento Consolidado</h3>
+                <button onclick="document.getElementById('grouped-payment-modal').classList.add('hidden'); document.getElementById('grouped-payment-modal').classList.remove('flex');" class="text-gray-400 hover:text-red-600"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <form id="grouped-payment-form" onsubmit="handleGroupedPaymentSubmit(event)">
+                <input type="hidden" name="id" value="">
+                <div class="mb-4">
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Selecione o Cliente</label>
+                    <select id="group-client-select" onchange="filterProjectsForGroupedPayment()" name="clientId" required class="w-full border border-gray-300 rounded-lg p-3 bg-white">
+                        <option value="">Selecione um cliente...</option>
+                    </select>
+                </div>
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-bold text-gray-700 mb-1">Nome do Agrupamento</label>
+                    <input type="text" name="groupName" required placeholder="Ex: Pagamento Lopes - Novembro" class="w-full border border-gray-300 rounded-lg p-3">
+                    <p class="text-xs text-gray-500 mt-1">Será usado no relatório contábil (Ex: Pagamento Consolidado - Lopes Novembro).</p>
+                </div>
+
+                <div class="mb-4" id="grouped-projects-container">
+                    <label class="block text-sm font-bold text-gray-700 mb-2 flex justify-between items-center">
+                        Projetos Pendentes do Cliente
+                        <span id="group-selected-budget-total" class="font-extrabold text-sm text-gray-800">Total Selecionado: R$ 0,00</span>
+                    </label>
+                    <div id="grouped-payment-list" class="max-h-60 overflow-y-auto border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50">
+                        <p class="text-gray-500 text-sm italic text-center">Selecione um cliente para carregar os projetos.</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div><label class="block text-sm font-bold text-gray-700 mb-1">Valor Recebido (R$)</label><input type="number" step="0.01" name="amount" required placeholder="Ex: 2000.00" class="w-full border border-gray-300 rounded-lg p-3"></div>
+                    <div><label class="block text-sm font-bold text-gray-700 mb-1">Data do Pagamento</label><input type="date" name="date" required class="w-full border border-gray-300 rounded-lg p-3"></div>
+                    <div class="col-span-2"><label class="block text-sm font-bold text-gray-700 mb-1">Método de Pagamento</label><select name="method" required class="w-full border border-gray-300 rounded-lg p-3 bg-white"><option>Pix</option><option>Boleto</option><option>Dinheiro</option><option>Cartão de Crédito</option></select></div>
+                </div>
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-bold text-gray-700 mb-1">Descrição (Opcional)</label>
+                    <input type="text" name="description" placeholder="Ex: Informação extra para o financeiro" class="w-full border border-gray-300 rounded-lg p-3">
+                </div>
+
+                <div class="mb-6 border-t pt-4">
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Nota Fiscal (Opcional)</label>
+                    <input type="file" name="invoiceFile" accept="application/pdf,image/*" class="w-full text-sm mb-2">
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Comprovante de Pagamento (Opcional)</label>
+                    <input type="file" name="receiptFile" accept="application/pdf,image/*" class="w-full text-sm">
+                </div>
+                
+                <div class="flex justify-between items-center pt-4 border-t">
+                    <button type="button" onclick="document.getElementById('grouped-payment-modal').classList.add('hidden'); document.getElementById('grouped-payment-modal').classList.remove('flex');" class="bg-gray-200 px-5 py-2 rounded-lg font-bold text-gray-700">Cancelar</button>
+                    <button type="submit" class="theme-bg text-white px-5 py-2 rounded-lg font-bold">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div id="invoice-upload-modal" class="fixed inset-0 bg-gray-900 bg-opacity-80 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-start border-b border-gray-200 pb-4 mb-6">
+                <h3 id="invoice-modal-title" class="text-xl font-bold text-gray-900">Anexar Nota Fiscal</h3>
+                <button onclick="closeInvoiceUploadModal()" class="text-gray-400 hover:text-red-600 transition"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <form id="invoice-upload-form" onsubmit="handleInvoiceUploadSubmit(event)">
+                <input type="hidden" name="projectId" value="">
+                <input type="hidden" name="currentInvoiceFile" value="">
+
+                <div class="mb-6">
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Arquivo da Nota Fiscal (.pdf, imagem)</label>
+                    <input type="file" name="invoiceFile" id="invoice-file-input" accept="application/pdf,image/*" class="w-full text-sm mb-2" required>
+                </div>
+                
+                <div id="current-invoice-info" class="mb-4 hidden p-3 bg-gray-50 rounded border border-gray-200">
+                    <p class="text-xs font-bold text-gray-700 mb-2">Arquivo Atual:</p>
+                    <a id="current-invoice-link" href="#" target="_blank" class="text-sm text-blue-600 hover:underline"></a>
+                    <button type="button" onclick="detachInvoiceFile()" class="ml-4 text-xs text-red-600 hover:text-red-800 font-bold">Desanexar</button>
+                </div>
+                
+                <div class="flex justify-end space-x-3 pt-4 border-t">
+                    <button type="button" onclick="closeInvoiceUploadModal()" class="bg-gray-200 px-5 py-2 rounded-lg font-bold text-gray-700">Cancelar</button>
+                    <button type="submit" class="theme-bg text-white px-5 py-2 rounded-lg font-bold">Anexar NF</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script>
+        const API_URL = 'api.php';
+        // V16: Novo logo padrão
+        const DEFAULT_LOGO = 'logogenerico.png'; 
+        let clientsCache = {}, suppliersCache = {}, servicesCache = {}; 
+        let clientsChartInstance = null;
+        let tempProjectDraft = null;
+        let tempPaymentDraft = null;
+        window.currentProjects = []; 
+        window.currentQuotes = []; 
+        window.currentQuoteId = null; 
+        
+        // V16: Novos valores padrão genéricos para o cabeçalho
+        const defaultSettings = { 
+            primaryColor: '#dc2626', 
+            logoUrl: 'logogenerico.png', 
+            logoSize: 80, 
+            icalUrl: '', 
+            logoUrlLocal: '',
+            headerTitle: 'Nome da Sua Empresa',
+            headerDocument: '00.000.000/0001-00',
+            headerSocial: '@seuhandle',
+            headerPhone1: '(11) 90000-0000',
+            headerPhone2: '(11) 90000-0000',
+            headerEmail: 'contato@suaempresa.com',
+            headerSlogan: 'SLOGAN DA EMPRESA'
+        };
+        // Variável global para armazenar as configurações atuais
+        window.appSettings = { ...defaultSettings };
+
+        const formatCurrency = (amount) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(amount || 0);
+        const formatDateForDisplay = (dateString) => {
+            if (!dateString) return '';
+            const date = new Date(dateString);
+            return new Date(date.getTime() + date.getTimezoneOffset() * 60000).toLocaleDateString('pt-BR');
+        };
+
+        async function logout() {
+            try {
+                // CORREÇÃO: Enviar credenciais no logout para destruir a sessão correta
+                await fetch(`${API_URL}?resource=auth&action=logout`, { credentials: 'include' });
+                window.location.href = 'login.html';
+            } catch (e) {
+                window.location.href = 'login.html';
+            }
+        }
+        
+        // --- FUNÇÃO CENTRAL DE FETCH ATUALIZADA (v3) ---
+        async function apiFetch(resource, method = 'GET', data = null, id = null, queryParams = {}) {
+            let url = `${API_URL}?resource=${resource}`;
+            if (id) url += `&id=${id}`;
+            if (method === 'GET') queryParams['_t'] = new Date().getTime();
+            const params = new URLSearchParams(queryParams);
+            if (params.toString()) url += '&' + params.toString();
+            
+            // CORREÇÃO: credentials: 'include' OBRIGATÓRIO para autenticação via sessão PHP
+            const options = { 
+                method: method, 
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include' 
+            };
+            if (data) options.body = JSON.stringify(data);
+            
+            try {
+                const response = await fetch(url, options);
+                
+                if (response.status === 401 && resource !== 'auth') { 
+                    window.location.href = 'login.html'; 
+                    return null; // Retorna null para indicar redirecionamento
+                }
+                
+                const textResponse = await response.text();
+                let jsonResponse;
+                try { jsonResponse = JSON.parse(textResponse); } catch(e) { throw new Error("Erro no servidor: " + textResponse); }
+                
+                if (!response.ok) throw new Error(jsonResponse.error || `Erro ${response.status}`);
+                return jsonResponse;
+            } catch (e) { 
+                // Loga erro no console para debug
+                console.error(`Falha no fetch para ${resource}:`, e);
+                // Repassa erro para ser tratado
+                throw e; 
+            }
+        }
+        
+        // CORREÇÃO: uploadFile também precisa de credenciais
+        async function uploadFile(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                const response = await fetch(`${API_URL}?resource=upload`, { 
+                    method: 'POST', 
+                    body: formData,
+                    credentials: 'include' // IMPORTANTE
+                });
+                const json = await response.json();
+                if(!response.ok) throw new Error(json.error || "Erro upload");
+                return json.url;
+            } catch(e) { throw e; }
+        }
+        
+        // NOVO V17: Função para excluir arquivos (usada na configuração de logo e desanexo de NF)
+        async function deleteFile(url) {
+            if (!url || url === DEFAULT_LOGO) return;
+            try {
+                // Remove apenas se o arquivo estiver em 'uploads/' (por segurança)
+                if (url.startsWith('uploads/')) {
+                    await apiFetch('delete_file', 'POST', { url: url });
+                }
+            } catch (e) {
+                console.warn(`Falha ao excluir arquivo antigo: ${url}`, e);
+                // Não alertamos o usuário, pois é uma rotina de limpeza interna
+            }
+        }
+
+
+        async function loadInitialData() {
+            await loadSettings(); 
+            document.getElementById('loading-indicator').classList.remove('hidden');
+            try { 
+                await refreshData(); 
+                switchTab('dashboard'); 
+            } catch (e) {
+                // CORREÇÃO: Agora exibe alerta em vez de engolir o erro
+                console.error("Erro ao carregar dados iniciais:", e);
+                alertUser("Erro ao carregar dados. Verifique sua conexão ou faça login novamente.", "red");
+            } finally { 
+                document.getElementById('loading-indicator').classList.add('hidden'); 
+            }
+        }
+        
+        async function refreshData() {
+             // Fetch em paralelo
+             const results = await Promise.all([
+                 apiFetch('clients'), 
+                 apiFetch('suppliers'), 
+                 apiFetch('services'), 
+                 apiFetch('projects'), 
+                 apiFetch('quotes')
+             ]);
+             
+             // Se algum retornou null (devido a 401/redirect), paramos
+             if (results.some(r => r === null)) return;
+
+             const [clients, suppliers, services, projects, quotes] = results;
+
+             clientsCache = clients.reduce((acc, c) => ({ ...acc, [String(c.id)]: c }), {});
+             suppliersCache = suppliers.reduce((acc, s) => ({ ...acc, [String(s.id)]: s }), {});
+             servicesCache = services.reduce((acc, s) => { s.unitValue = s.unitValue !== undefined ? parseFloat(s.unitValue) : (s.unit_value !== undefined ? parseFloat(s.unit_value) : 0); return { ...acc, [String(s.id)]: s }; }, {});
+             
+             window.currentProjects = projects; 
+             window.currentQuotes = quotes.filter(q => q.status !== 'Convertido');
+             
+             const cSelect = document.getElementById('filter-client');
+             if(cSelect) { cSelect.innerHTML = '<option value="">Todos</option>'; Object.values(clientsCache).forEach(c => cSelect.innerHTML += `<option value="${c.id}">${c.name}</option>`); }
+             
+             const gSelect = document.getElementById('group-client-select');
+             if(gSelect) { gSelect.innerHTML = '<option value="">Selecione um cliente...</option>' + Object.values(clientsCache).map(c => `<option value="${c.id}">${c.name}</option>`).join(''); }
+             
+             renderClients(); 
+             renderSuppliers(); 
+             renderServices(); 
+             applyFilters(); 
+             renderAccountingProjectSelector(window.currentProjects); 
+             renderQuotesList(window.currentQuotes); 
+             renderDashboard();
+             
+             if (window.currentDetailProjectId) { const up = window.currentProjects.find(p => p.id == window.currentDetailProjectId); if (up) renderProjectDetails(up); }
+        }
+
+        // ... (Demais funções mantidas exatamente como estavam, apenas com a estrutura preservada)
+        async function syncGoogleCalendar() {
+            const settings = await loadSettings();
+            if (!settings.icalUrl) { alertUser("Configure a URL do iCal nas configurações!", "red"); openSettingsModal(); return; }
+            if(!confirm("Importar novos eventos da agenda?")) return;
+            try { const result = await apiFetch('sync_calendar', 'POST', { url: settings.icalUrl }); await refreshData(); alertUser(result.message || "Sincronizado!", "green"); } catch (e) {}
+        }
+        
+        // --- RENDERIZAÇÃO E GRÁFICOS ---
+        function renderDashboard() {
+            const projects = window.currentProjects || []; const now = new Date(); const currentMonth = now.getMonth(); const currentYear = now.getFullYear(); let monthTotal = 0, yearTotal = 0, activeProjects = 0; const clientTotals = {}; const statement = []; const processedGroupedPayments = new Set();
+            projects.forEach(p => {
+                if (p.status !== 'Concluído') activeProjects++; let projectRevenueYear = 0, projectExpensesYear = 0;
+                if (!p.groupedPaymentId && p.clientPayments) {
+                    p.clientPayments.forEach(pay => { const payDate = new Date(pay.date); payDate.setMinutes(payDate.getMinutes() + payDate.getTimezoneOffset()); const amount = parseFloat(pay.amount) || 0; if (payDate.getFullYear() === currentYear) { yearTotal += amount; projectRevenueYear += amount; if (payDate.getMonth() === currentMonth) { monthTotal += amount; statement.push({ date: payDate, type: 'in', amount: amount, desc: `Receita - ${p.title}`, pid: p.id }); } } });
+                } 
+                if (p.groupedPaymentId && p.groupedPayment && !processedGroupedPayments.has(p.groupedPaymentId)) {
+                    const pay = p.groupedPayment; const payDate = new Date(pay.date); payDate.setMinutes(payDate.getMinutes() + payDate.getTimezoneOffset()); const amount = parseFloat(pay.amount) || 0; if (payDate.getFullYear() === currentYear) { yearTotal += amount; projectRevenueYear += amount; if (payDate.getMonth() === currentMonth) { monthTotal += amount; statement.push({ date: payDate, type: 'in', amount: amount, desc: `Receita Agrupada - ${clientsCache[p.clientId]?.name}`, pid: p.id, isGrouped: true, groupId: p.groupedPaymentId }); } } processedGroupedPayments.add(p.groupedPaymentId);
+                }
+                if (p.operationalPayments) {
+                    p.operationalPayments.forEach(pay => { const payDate = new Date(pay.date); payDate.setMinutes(payDate.getMinutes() + payDate.getTimezoneOffset()); const amount = parseFloat(pay.amount) || 0; if (payDate.getFullYear() === currentYear) { yearTotal -= amount; projectExpensesYear += amount; if (payDate.getMonth() === currentMonth) { monthTotal -= amount; const supName = suppliersCache[pay.supplierId]?.name || 'Desconhecido'; statement.push({ date: payDate, type: 'out', amount: amount, desc: `Despesa - ${p.title} (${supName})`, pid: p.id }); } } });
+                }
+                if (projectRevenueYear > 0 || projectExpensesYear > 0) { const cName = clientsCache[p.clientId]?.name || 'Desconhecido'; if (!clientTotals[cName]) clientTotals[cName] = 0; const currentProjectTotalBudgeted = p.serviceItems.reduce((sum, i) => sum + (parseFloat(i.totalValue) || 0), 0); if (p.groupedPaymentId && p.groupedPayment) { clientTotals[cName] += (currentProjectTotalBudgeted - projectExpensesYear); } else { const received = (p.clientPayments || []).reduce((sum, pay) => sum + (parseFloat(pay.amount) || 0), 0); clientTotals[cName] += (received - projectExpensesYear); } }
+            });
+            const mEl = document.getElementById('dash-month-total'), yEl = document.getElementById('dash-year-total'); mEl.textContent = formatCurrency(monthTotal); mEl.className = `text-3xl font-extrabold ${monthTotal >= 0 ? 'theme-text' : 'text-red-600'}`; yEl.textContent = formatCurrency(yearTotal); yEl.className = `text-3xl font-extrabold ${yearTotal >= 0 ? 'text-green-600' : 'text-red-600'}`; document.getElementById('dash-active-projects').textContent = activeProjects;
+            const stmtBody = document.getElementById('dashboard-statement-body'); stmtBody.innerHTML = statement.length ? statement.sort((a,b) => b.date - a.date).map(i => { const isGrouped = i.isGrouped ? `<span class="text-xs font-medium text-gray-500 ml-2">(Grupo #${i.groupId})</span>` : ''; return `<tr class="hover:bg-gray-50 cursor-pointer transition" onclick="openDetailModal('${i.pid}')"><td class="px-3 py-2 text-gray-600">${i.date.toLocaleDateString()}</td><td class="px-3 py-2 text-gray-800 font-medium truncate max-w-xs" title="${i.desc}">${i.desc}${isGrouped}</td><td class="px-3 py-2 text-right font-bold ${i.type==='in'?'text-green-600':'text-red-600'}">${i.type==='in'?'+':'-'} ${formatCurrency(i.amount)}</td></tr>`}).join('') : '<tr><td colspan="3" class="p-4 text-center text-gray-400 italic">Nenhuma movimentação este mês.</td></tr>'; renderClientsChart(clientTotals);
+        }
+        
+        function renderClientsChart(clientTotals) {
+             const labels = Object.keys(clientTotals);
+             const data = Object.values(clientTotals);
+             const ctx = document.getElementById('clientsChart');
+             if(clientsChartInstance) clientsChartInstance.destroy();
+             const themeColor = getComputedStyle(document.documentElement).getPropertyValue('--primary-color').trim();
+             const hoverColor = themeColor.replace('rgb', 'rgba').replace(')', ', 0.8)'); 
+             clientsChartInstance = new Chart(ctx, { type: 'bar', data: { labels: labels, datasets: [{ label: 'Lucro Líquido (R$)', data: data, backgroundColor: themeColor, hoverBackgroundColor: hoverColor, borderColor: themeColor, borderWidth: 1 }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { callback: function(value) { return formatCurrency(value); } } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(context) { return 'Lucro: ' + formatCurrency(context.parsed.y); } } } } } });
+        }
+
+        const calculateProjectValues = (item) => { const isProject = item.clientPayments !== undefined; const serviceItems = item.serviceItems || []; const budgetedValue = serviceItems.reduce((sum, i) => sum + (parseFloat(i.totalValue) || 0), 0); if (isProject) { let received = 0; if (item.groupedPaymentId) { received = budgetedValue; } else { received = (item.clientPayments || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0); } const expenses = (item.operationalPayments || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0); return { budgetedValue, received, expenses, balance: received - expenses }; } return { budgetedValue }; };
+        window.applyFilters = () => { const search = document.getElementById('filter-search').value.toLowerCase(); const month = document.getElementById('filter-month').value; const clientId = document.getElementById('filter-client').value; const type = document.getElementById('filter-type').value; const filtered = window.currentProjects.filter(p => { const pDate = p.projectDate ? p.projectDate.substring(0, 7) : ''; return (p.title.toLowerCase().includes(search) || (clientsCache[p.clientId]?.name || '').toLowerCase().includes(search)) && (!month || pDate === month) && (!clientId || p.clientId == clientId) && (!type || p.projectType === type); }); renderProjects(filtered); };
+
+        // ATENÇÃO: Funções mantidas do original (minificadas ou resumidas na visualização mas funcionais)
+        window.renderProjects = (projects) => { const list = document.getElementById('projects-list'); list.className = "space-y-8"; if (projects.length === 0) { list.innerHTML = '<div class="text-center py-12 text-gray-500 italic">Nenhum projeto encontrado.</div>'; return; } const groups = {}; projects.forEach(p => { let date = p.projectDate ? new Date(p.projectDate) : new Date(p.created_at || Date.now()); date.setMinutes(date.getMinutes() + date.getMinutes() + date.getTimezoneOffset()); const sortKey = date.toISOString().slice(0, 7); if (!groups[sortKey]) groups[sortKey] = { name: date.toLocaleString('pt-BR', { month: 'long', year: 'numeric' }), clients: {} }; const cId = p.clientId || 'uk'; if(!groups[sortKey].clients[cId]) groups[sortKey].clients[cId] = []; groups[sortKey].clients[cId].push(p); }); const sortedKeys = Object.keys(groups).sort().reverse(); let html = ''; sortedKeys.forEach(monthKey => { html += `<div class="month-section animate-fade-in"><div class="flex items-center mb-6 pb-2 border-b-2 border-gray-300"><div class="px-4 py-1 bg-gray-900 text-white rounded-full mr-3 font-bold text-sm shadow tracking-wide theme-bg">${groups[monthKey].name.toUpperCase()}</div></div><div class="space-y-6">`; for (const [cId, pList] of Object.entries(groups[monthKey].clients)) { html += `<div class="bg-white rounded-xl border border-gray-200 overflow-hidden"><div class="bg-gray-50 px-4 py-2 border-b border-gray-200 flex items-center"><div class="w-2 h-8 rounded-full mr-3 theme-bg"></div><h3 class="font-bold text-gray-800 text-lg">${clientsCache[cId]?.name || 'Desconhecido'}</h3></div><div class="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">`; pList.forEach(project => { const financials = calculateProjectValues(project); const percentReceived = financials.budgetedValue > 0 ? Math.min((financials.received / financials.budgetedValue) * 100, 100) : 0; const typeBadge = project.projectType === 'Freela' ? '<span class="bg-blue-50 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded border border-blue-100 uppercase">FREELA</span>' : '<span class="bg-purple-50 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded border border-purple-100 uppercase">PROJETO</span>'; const dateStr = project.projectDate ? new Date(project.projectDate).toLocaleDateString('pt-BR', {timeZone: 'UTC', day: '2-digit', month:'2-digit'}) : ''; let nfTag = ''; let isGrouped = project.groupedPaymentId !== null; if(isGrouped) { nfTag = `<span class="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-0.5 rounded border border-purple-200 uppercase flex items-center">NF GRUPO</span>`; } else if(project.requiresInvoice) { if(project.invoiceIssued) { const link = project.invoiceFile ? `<a href="${project.invoiceFile}" target="_blank" class="ml-1 hover:text-green-800" title="Ver NF">📎</a>` : ''; nfTag = `<span class="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-0.5 rounded border border-green-200 uppercase flex items-center">NF Emitida ${link}</span>`; } else { nfTag = `<span class="bg-red-100 text-red-800 text-[10px] font-bold px-2 py-0.5 rounded border border-red-200 uppercase">NF Pendente</span>`; } } html += `<div class="bg-white rounded-lg border border-gray-200 p-4 relative hover:shadow-md transition group"><div class="flex justify-between items-start mb-2"><div><span class="text-[10px] font-bold text-gray-400 flex items-center mb-1"><svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg> ${dateStr}</span><h4 class="font-bold text-gray-800 leading-tight">${project.title}</h4></div><div class="flex flex-col items-end gap-1"><div class="transform scale-90 origin-top-right">${getStatusTag(project.status, isGrouped)}</div>${typeBadge}</div></div><div class="mt-3 space-y-2"><div class="flex justify-between text-xs font-medium text-gray-500"><span>Orçamento</span><span class="text-gray-800 font-bold">${formatCurrency(financials.budgetedValue)}</span></div><div class="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden"><div class="h-full rounded-full theme-bg" style="width: ${percentReceived}%"></div></div><div class="flex justify-between text-[10px] font-bold text-gray-400 uppercase mt-1 items-center"><span class="${financials.balance >= 0 ? 'text-green-600' : 'text-red-600'}">Saldo: ${formatCurrency(financials.balance)}</span>${nfTag}</div></div><div class="mt-3 pt-3 border-t border-gray-100 flex gap-2"><button onclick="openDetailModal('${project.id}')" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold py-1.5 rounded">Finanças</button><button onclick="openProjectModal('${project.id}')" class="bg-gray-100 hover:bg-gray-200 text-gray-500 px-2 rounded"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button></div></div>`; }); html += `</div></div>`; } html += `</div></div>`; }); list.innerHTML = html; };
+        window.renderQuotesList = (quotes) => { 
+            const list = document.getElementById('quotes-list'); 
+            const visibleQuotes = quotes.filter(q => q.status !== 'Convertido');
+            
+            if (visibleQuotes.length === 0) { 
+                list.innerHTML = '<div class="text-center py-6 text-gray-500 italic">Nenhum orçamento encontrado. Crie o primeiro!</div>'; 
+                return; 
+            } 
+            
+            // CORREÇÃO v19: Layout responsivo para os cards de orçamento.
+            try {
+                const html = visibleQuotes.map(q => { 
+                    const f = calculateProjectValues(q); 
+                    const statusTag = getQuoteStatusTag(q.status); 
+                    const isApproved = q.status === 'Aprovado'; 
+                    let buttonsHtml = `<button onclick="openProposalView('${q.id}')" class="bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold py-1 px-3 rounded text-xs transition">Visualizar</button><button onclick="openQuoteModal('${q.id}')" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-1 px-3 rounded text-xs transition">Editar</button>`; 
+                    if (isApproved) { 
+                        buttonsHtml = `<button onclick="openProposalView('${q.id}')" class="bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold py-1 px-3 rounded text-xs transition">Visualizar</button><button onclick="convertQuoteToProject('${q.id}')" class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded text-xs transition" title="Gerar Projeto">Gerar Projeto</button>`; 
+                    } 
+                    
+                    // Adiciona flex-col e flex-wrap para ajustar em telas pequenas
+                    return `<div class="bg-white p-4 rounded-xl border border-gray-200 flex flex-col sm:flex-row justify-between items-start sm:items-center hover:shadow-md transition">
+                                <div class="flex-1 min-w-0 mr-4 mb-3 sm:mb-0">
+                                    <div class="flex items-center space-x-2">
+                                        <h4 class="font-bold text-gray-900 leading-tight">${q.title}</h4>
+                                        <span class="text-xs text-gray-400">#${q.id}</span>
+                                    </div>
+                                    <p class="text-sm text-gray-500 mt-0.5">${clientsCache[q.clientId]?.name || 'Cliente Desconhecido'}</p>
+                                    <p class="text-xs text-gray-400 mt-1">${q.executionDate ? 'Data: ' + new Date(q.executionDate).toLocaleDateString() : 'Data não definida'}</p>
+                                </div>
+                                
+                                <div class="flex items-end flex-wrap sm:flex-nowrap sm:space-x-4 space-x-2 w-full sm:w-auto">
+                                    <span class="text-base font-extrabold text-gray-800 flex-shrink-0">${formatCurrency(f.budgetedValue)}</span>
+                                    
+                                    <div class="transform scale-90 flex-shrink-0">${statusTag}</div>
+                                    
+                                    <div class="flex space-x-2 mt-2 sm:mt-0 flex-shrink-0">${buttonsHtml}</div>
+                                </div>
+                            </div>`; 
+                }).join(''); 
+                list.innerHTML = html; 
+            } catch (e) {
+                console.error("Erro ao renderizar orçamentos:", e);
+                list.innerHTML = `<div class="text-center py-6 text-red-500 font-bold">ERRO DE RENDERIZAÇÃO! Verifique o console do navegador (F12) para detalhes.</div>`;
+                alertUser("Erro ao exibir lista de orçamentos (Frontend).", "red");
+            }
+        };
+        
+        window.renderClients = () => { document.getElementById('clients-list').innerHTML = Object.values(clientsCache).map(c => `<div class="bg-white p-6 rounded-xl card flex justify-between items-center border border-gray-100"><div><h3 class="font-bold text-lg text-gray-900">${c.name}</h3><p class="text-sm text-gray-500">${c.email || '-'}</p></div><div class="flex gap-2"><button onclick="openClientModal('${c.id}')" class="text-gray-500 hover:text-red-600 p-2 rounded hover:bg-gray-100 transition">Editar</button><button onclick="deleteGeneric('clients', '${c.id}')" class="text-red-400 hover:text-red-600 p-2 rounded hover:bg-red-50 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div></div>`).join('') || '<p class="text-gray-500 italic">Vazio.</p>'; };
+        window.renderSuppliers = () => { document.getElementById('suppliers-list').innerHTML = Object.values(suppliersCache).map(s => `<div class="bg-white p-6 rounded-xl card flex justify-between items-center border border-gray-100"><div><h3 class="font-bold text-lg text-gray-900">${s.name}</h3><p class="text-sm text-gray-500">${s.type}</p></div><div class="flex gap-2"><button onclick="openSupplierModal('${s.id}')" class="text-gray-500 hover:text-red-600 p-2 rounded hover:bg-gray-100 transition">Editar</button><button onclick="deleteGeneric('suppliers', '${s.id}')" class="text-red-400 hover:text-red-600 p-2 rounded hover:bg-red-50 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div></div>`).join('') || '<p class="text-gray-500 italic">Vazio.</p>'; };
+        window.renderServices = () => { document.getElementById('services-list').innerHTML = Object.values(servicesCache).map(s => `<div class="bg-white p-6 rounded-xl card flex justify-between items-center border border-gray-100"><div><h3 class="font-bold text-lg text-gray-900">${s.description}</h3><p class="text-sm text-gray-600 font-bold">${formatCurrency(s.unitValue)}</p></div><div class="flex gap-2"><button onclick="openServiceModal('${s.id}')" class="text-gray-500 hover:text-red-600 p-2 rounded hover:bg-gray-100 transition">Editar</button><button onclick="deleteGeneric('services', '${s.id}')" class="text-red-400 hover:text-red-600 p-2 rounded hover:bg-red-50 transition"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div></div>`).join('') || '<p class="text-gray-500 italic">Vazio.</p>'; };
+
+        const getStatusTag = (status, isGrouped = false) => { let color = 'bg-gray-200 text-gray-700'; if(status === 'Concluído' && isGrouped) color = 'bg-purple-100 text-purple-800 border border-purple-200'; else if(status === 'Concluído') color = 'bg-green-100 text-green-800 border border-green-200'; else if(status === 'Em Andamento') color = 'bg-blue-100 text-blue-800 border border-blue-200'; else if(status === 'Pendente') color = 'bg-yellow-100 text-yellow-800 border border-yellow-200'; else if(status === 'Aguardando Pagamento') color = 'bg-orange-100 text-orange-800 border border-orange-200'; const tagText = isGrouped ? 'Consolidado' : status; return `<span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold uppercase ${color}">${tagText}</span>`; };
+        const getQuoteStatusTag = (status) => { let color = 'bg-gray-200 text-gray-700'; if(status === 'Aprovado') color = 'bg-green-100 text-green-800 border border-green-200'; else if(status === 'Enviado') color = 'bg-blue-100 text-blue-800 border border-blue-200'; else if(status === 'Rascunho') color = 'bg-yellow-100 text-yellow-800 border border-yellow-200'; else if(status === 'Rejeitado') color = 'bg-red-100 text-red-800 border border-red-200'; else if(status === 'Convertido') color = 'bg-purple-100 text-purple-800 border border-purple-200'; return `<span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold uppercase ${color}">${status}</span>`; };
+        
+        // CORREÇÃO V12: Atualiza loadSettings para carregar e aplicar os novos campos
+        async function loadSettings() { 
+             let settings = { ...defaultSettings }; 
+             try { 
+                 const dbSettingsArray = await apiFetch('settings'); 
+                 const dbSettings = Object.fromEntries(Object.entries(dbSettingsArray).map(([key, value]) => [key, value])); 
+                 settings = { ...settings, ...dbSettings }; 
+                 settings.logoSize = parseInt(settings.logoSize) || defaultSettings.logoSize; 
+             } catch (e) {} 
+             
+             window.appSettings = settings;
+             applyThemeSettings(settings); 
+             
+             // Aplica o valor aos inputs de settings (só para o modal)
+             const colorInput = document.getElementById('setting-color'); 
+             const logoInput = document.getElementById('setting-logo-url'); 
+             const sizeInput = document.getElementById('setting-logo-size'); 
+             const sizeDisplay = document.getElementById('logo-size-display'); 
+             const icalInput = document.getElementById('setting-ical-url'); 
+             
+             // Novos campos de cabeçalho
+             const headerTitle = document.querySelector('input[name="headerTitle"]');
+             const headerDocument = document.querySelector('input[name="headerDocument"]');
+             const headerSocial = document.querySelector('input[name="headerSocial"]');
+             const headerPhone1 = document.querySelector('input[name="headerPhone1"]');
+             const headerPhone2 = document.querySelector('input[name="headerPhone2"]');
+             const headerEmail = document.querySelector('input[name="headerEmail"]');
+             const headerSlogan = document.querySelector('input[name="headerSlogan"]');
+             
+             if(colorInput) colorInput.value = settings.primaryColor; 
+             if(icalInput) icalInput.value = settings.icalUrl || ''; 
+             if(logoInput) { logoInput.value = settings.logoUrl; logoInput.placeholder = "Ou URL..."; } 
+             if(sizeInput) { sizeInput.value = settings.logoSize; sizeDisplay.textContent = settings.logoSize + 'px'; } 
+             
+             // Preenche os novos campos
+             if(headerTitle) headerTitle.value = settings.headerTitle || '';
+             if(headerDocument) headerDocument.value = settings.headerDocument || '';
+             if(headerSocial) headerSocial.value = settings.headerSocial || '';
+             if(headerPhone1) headerPhone1.value = settings.headerPhone1 || '';
+             if(headerPhone2) headerPhone2.value = settings.headerPhone2 || '';
+             if(headerEmail) headerEmail.value = settings.headerEmail || '';
+             if(headerSlogan) headerSlogan.value = settings.headerSlogan || '';
+
+             return settings; 
+         }
+        
+        function applyThemeSettings(settings) { 
+            document.documentElement.style.setProperty('--primary-color', settings.primaryColor); 
+            let styleTag = document.getElementById('theme-overrides'); 
+            if (!styleTag) { 
+                styleTag = document.createElement('style'); 
+                styleTag.id = 'theme-overrides'; 
+                document.head.appendChild(styleTag); 
+            } 
+            styleTag.innerHTML = `.bg-red-600, .bg-indigo-600, .bg-green-600, .bg-purple-600 { background-color: ${settings.primaryColor} !important; } .hover\\:bg-red-700:hover { filter: brightness(0.85) !important; background-color: ${settings.primaryColor} !important; } .text-red-600, .text-red-700 { color: ${settings.primaryColor} !important; } .border-red-600 { border-color: ${settings.primaryColor} !important; } .focus\\:ring-red-500:focus { --tw-ring-color: ${settings.primaryColor} !important; }`; 
+            
+            // Aplica logo e tamanho em ambos os elementos de logo (desktop e mobile)
+            const logoIds = ['app-logo-desktop', 'app-logo-mobile'];
+            logoIds.forEach(id => {
+                const logoImg = document.getElementById(id); 
+                if(logoImg) {
+                    logoImg.src = settings.logoUrl || DEFAULT_LOGO; 
+                    // Aplica tamanho dinâmico APENAS ao logo desktop
+                    if (id === 'app-logo-desktop') {
+                       logoImg.style.height = settings.logoSize + 'px';
+                    }
+                }
+            });
+            
+            const reportLogo = document.querySelector('.report-header-logo'); 
+            if(reportLogo) { reportLogo.src = settings.logoUrl || DEFAULT_LOGO; } 
+        }
+        
+        // CORREÇÃO V12: Atualiza saveSettings para incluir os novos campos no payload
+        // V17: Adicionado lógica de exclusão do arquivo de logo anterior, se for um novo upload de arquivo.
+        async function saveSettings(e) { 
+            e.preventDefault(); 
+            const fd = new FormData(e.target);
+            const data = Object.fromEntries(fd.entries());
+            
+            const color = data.primaryColor; 
+            const size = data.logoSize; 
+            const fileInput = document.getElementById('setting-logo-file'); 
+            const urlInput = document.getElementById('setting-logo-url'); 
+            const icalUrl = data.icalUrl; 
+            
+            let logoData = urlInput.value.trim() || DEFAULT_LOGO; 
+            const btn = e.target.querySelector('button[type="submit"]'); 
+            const originalText = btn.innerText; 
+            btn.disabled = true; 
+            btn.innerText = "Salvando..."; 
+            
+            // Obtém a URL antiga do logo
+            const oldLogoUrl = window.appSettings.logoUrl;
+
+            try { 
+                if (fileInput.files && fileInput.files[0]) {
+                    // 1. Faz upload do novo arquivo
+                    logoData = await uploadFile(fileInput.files[0]); 
+                    // 2. Exclui o arquivo antigo (se for um arquivo e diferente do novo)
+                    if (oldLogoUrl && oldLogoUrl !== logoData && oldLogoUrl.startsWith('uploads/')) {
+                         await deleteFile(oldLogoUrl);
+                    }
+                } else if (urlInput.value.trim() && urlInput.value.trim() !== oldLogoUrl) {
+                    // Se a URL foi alterada manualmente (e não é um arquivo), verifica se a antiga era um upload
+                    if (oldLogoUrl && oldLogoUrl.startsWith('uploads/')) {
+                        await deleteFile(oldLogoUrl);
+                    }
+                    logoData = urlInput.value.trim();
+                } else if (!logoData) {
+                    // Se for apagado e não tiver upload, usa o padrão
+                    logoData = DEFAULT_LOGO; 
+                }
+                
+                // Monta o payload completo
+                const settingsPayload = { 
+                    primaryColor: color, 
+                    logoUrl: logoData, 
+                    logoSize: size, 
+                    icalUrl: icalUrl,
+                    headerTitle: data.headerTitle || defaultSettings.headerTitle,
+                    headerDocument: data.headerDocument || defaultSettings.headerDocument,
+                    headerSocial: data.headerSocial || defaultSettings.headerSocial,
+                    headerPhone1: data.headerPhone1 || defaultSettings.headerPhone1,
+                    headerPhone2: data.headerPhone2 || defaultSettings.headerPhone2,
+                    headerEmail: data.headerEmail || defaultSettings.headerEmail,
+                    headerSlogan: data.headerSlogan || defaultSettings.headerSlogan
+                }; 
+                
+                await apiFetch('settings', 'POST', settingsPayload); 
+                window.appSettings = settingsPayload; // Atualiza a variável global
+                applyThemeSettings(settingsPayload); 
+                closeSettingsModal(); 
+                alertUser("Configurações salvas!", "green"); 
+                await refreshData(); 
+            } catch (err) { 
+                alertUser("Erro ao salvar configurações: " + err.message, "red"); 
+            } finally { 
+                btn.disabled = false; 
+                btn.innerText = originalText; 
+            } 
+        }
+        
+        // CORREÇÃO V12: Atualiza resetSettings para incluir os novos campos
+        async function resetSettings() { 
+            if(confirm("Restaurar para as configurações padrão?")) { 
+                
+                // V17: Exclui o logo antigo se ele não for o padrão
+                const oldLogoUrl = window.appSettings.logoUrl;
+                if (oldLogoUrl && oldLogoUrl !== DEFAULT_LOGO && oldLogoUrl.startsWith('uploads/')) {
+                     await deleteFile(oldLogoUrl);
+                }
+                
+                try { 
+                    await apiFetch('settings', 'POST', { 
+                        primaryColor: defaultSettings.primaryColor, 
+                        logoUrl: defaultSettings.logoUrl, 
+                        logoSize: defaultSettings.logoSize, 
+                        icalUrl: defaultSettings.icalUrl,
+                        headerTitle: defaultSettings.headerTitle,
+                        headerDocument: defaultSettings.headerDocument,
+                        headerSocial: defaultSettings.headerSocial,
+                        headerPhone1: defaultSettings.headerPhone1,
+                        headerPhone2: defaultSettings.headerPhone2,
+                        headerEmail: defaultSettings.headerEmail,
+                        headerSlogan: defaultSettings.headerSlogan
+                    }); 
+                    loadSettings(); 
+                    closeSettingsModal(); 
+                    alertUser("Configurações restauradas.", "green"); 
+                } catch(e) { 
+                    alertUser("Erro ao restaurar configurações.", "red"); 
+                } 
+            } 
+        }
+        
+        window.openSettingsModal = () => { document.getElementById('settings-modal-title').textContent = 'Configurações do Sistema'; loadSettings(); document.getElementById('settings-modal').classList.remove('hidden'); document.getElementById('settings-modal').classList.add('flex'); };
+        window.closeSettingsModal = () => { document.getElementById('settings-modal').classList.add('hidden'); document.getElementById('settings-modal').classList.remove('flex'); };
+        document.getElementById('setting-logo-size').addEventListener('input', (e) => document.getElementById('logo-size-display').textContent = e.target.value + 'px');
+        const alertUser = (msg, color='blue') => { const div = document.createElement('div'); const bg = color==='red' ? 'bg-red-600' : (color==='green' ? 'bg-green-600' : 'bg-blue-600'); div.className = `fixed top-5 right-5 ${bg} text-white px-6 py-3 rounded-lg shadow-xl z-[100] font-bold flex items-center animate-fade-in-down`; div.innerHTML = `<span>${msg}</span>`; document.body.appendChild(div); setTimeout(() => div.remove(), 3000); };
+        
+        window.deleteGeneric = async (resource, id) => { if(confirm('Tem certeza?')) { try { await apiFetch(resource, 'DELETE', null, id); await refreshData(); alertUser('Excluído', 'green'); } catch(e) {} } };
+        window.switchTab = (tab) => { 
+            // 1. Oculta todos os conteúdos e remove a classe ativa de todos os botões
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden')); 
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active')); 
+
+            // 2. Exibe o conteúdo correto e ativa o botão correto
+            document.getElementById(`content-${tab}`).classList.remove('hidden'); 
+            const activeBtn = document.getElementById(`tab-${tab}`);
+            if (activeBtn) activeBtn.classList.add('active'); 
+            
+            // 3. Sincroniza o dropdown (select)
+            const select = document.getElementById('mobile-tab-select');
+            if (select && select.value !== tab) {
+                select.value = tab;
+            }
+        };
+        window.closeModal = () => { document.getElementById('generic-modal').classList.add('hidden'); document.getElementById('generic-modal').classList.remove('flex'); if(window.currentDetailProjectId) refreshData(); };
+        window.closeDetailModal = () => { document.getElementById('project-detail-modal').classList.add('hidden'); document.getElementById('project-detail-modal').classList.remove('flex'); window.currentDetailProjectId = null; };
+        window.closeProposalModal = () => { document.getElementById('proposal-modal').classList.add('hidden'); document.getElementById('proposal-modal').classList.remove('flex'); window.currentQuoteId = null; };
+        
+        window.closeInvoiceUploadModal = () => { document.getElementById('invoice-upload-modal').classList.add('hidden'); document.getElementById('invoice-upload-modal').classList.remove('flex'); };
+
+        window.openInvoiceUploadModal = (projectId) => {
+            const project = window.currentProjects.find(p => p.id == projectId);
+            if (!project) return alertUser("Projeto não encontrado.", 'red');
+            
+            // Verifica se está consolidado
+            if (project.groupedPaymentId) {
+                 return alertUser("Este projeto está em um Pagamento Consolidado. Anexe a NF no recebimento agrupado.", 'red');
+            }
+
+            const modal = document.getElementById('invoice-upload-modal');
+            const form = document.getElementById('invoice-upload-form');
+            const currentInfo = document.getElementById('current-invoice-info');
+            const currentLink = document.getElementById('current-invoice-link');
+            const fileInput = document.getElementById('invoice-file-input');
+            const submitBtn = form.querySelector('button[type="submit"]');
+
+            form.reset();
+            form.querySelector('input[name="projectId"]').value = projectId;
+            form.querySelector('input[name="currentInvoiceFile"]').value = project.invoiceFile || '';
+            fileInput.required = true;
+            submitBtn.textContent = 'Anexar NF';
+
+            if (project.invoiceFile) {
+                currentInfo.classList.remove('hidden');
+                currentLink.href = project.invoiceFile;
+                currentLink.textContent = project.invoiceFile.split('/').pop();
+                submitBtn.textContent = 'Substituir NF';
+                fileInput.required = false; // Permite submeter apenas para desanexar
+            } else {
+                currentInfo.classList.add('hidden');
+            }
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        };
+        
+        window.detachInvoiceFile = async () => {
+             if (!confirm("Tem certeza que deseja desanexar a Nota Fiscal deste projeto?")) return;
+             const projectId = document.getElementById('invoice-upload-form').querySelector('input[name="projectId"]').value;
+             try {
+                // Atualiza o projeto com invoiceFile=null e invoiceIssued=0
+                const project = window.currentProjects.find(p => p.id == projectId);
+                if (!project) return;
+                
+                // Monta o payload mínimo para atualizar a NF
+                const payload = {
+                    id: projectId,
+                    // Mantém dados essenciais, apenas a NF é atualizada
+                    clientId: project.clientId, 
+                    title: project.title, 
+                    description: project.description,
+                    status: project.status,
+                    projectDate: project.projectDate,
+                    projectType: project.projectType,
+                    requiresInvoice: 0, // Desvincula o arquivo e o requerimento
+                    invoiceIssued: 0,
+                    invoiceFile: null // Garante que o campo é limpo
+                };
+                
+                await apiFetch('projects', 'PUT', payload, projectId);
+                
+                // Se houver um arquivo a ser excluído (opcional)
+                const oldFileUrl = document.getElementById('invoice-upload-form').querySelector('input[name="currentInvoiceFile"]').value;
+                await deleteFile(oldFileUrl); 
+                
+                closeInvoiceUploadModal();
+                await refreshData();
+                alertUser('Nota Fiscal desanexada e projeto atualizado.', 'green');
+             } catch (e) {
+                alertUser("Erro ao desanexar NF: " + e.message, 'red');
+             }
+        };
+
+        window.handleInvoiceUploadSubmit = async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const projectId = form.querySelector('input[name="projectId"]').value;
+            const fileInput = document.getElementById('invoice-file-input');
+            const currentInvoiceFile = form.querySelector('input[name="currentInvoiceFile"]').value;
+            const submitBtn = form.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+            
+            submitBtn.innerText = "Enviando...";
+            submitBtn.disabled = true;
+
+            try {
+                let invoiceFileUrl = currentInvoiceFile;
+                
+                if (fileInput.files.length > 0) {
+                    // 1. Faz upload do novo arquivo
+                    invoiceFileUrl = await uploadFile(fileInput.files[0]);
+                    
+                    // 2. Exclui o arquivo antigo (se houver e for diferente do novo)
+                    if (currentInvoiceFile && currentInvoiceFile !== invoiceFileUrl) {
+                        await deleteFile(currentInvoiceFile);
+                    }
+                } else if (!currentInvoiceFile) {
+                    // Se não há arquivo antigo e não foi enviado novo, é um erro se o campo for required.
+                    return; // Já tratado pelo required=true se for criação
+                }
+
+                if (!invoiceFileUrl && !fileInput.files.length) {
+                     // Deveria ter sido tratado pelo detachInvoiceFile, mas se chegar aqui, apenas sai.
+                     // (Isso impede que um PUT seja enviado sem arquivo e sem forçar NULL, se o detach falhou)
+                     return;
+                }
+                
+                // 3. Atualiza o projeto no banco de dados
+                const project = window.currentProjects.find(p => p.id == projectId);
+                if (!project) throw new Error("Projeto não encontrado.");
+                
+                // Monta o payload mínimo para atualizar a NF
+                const payload = {
+                    id: projectId,
+                    // Mantém dados essenciais
+                    clientId: project.clientId, 
+                    title: project.title, 
+                    description: project.description,
+                    status: project.status,
+                    projectDate: project.projectDate,
+                    projectType: project.projectType,
+                    requiresInvoice: 1, // Marca como requer NF
+                    invoiceIssued: 1, // Marca como NF emitida
+                    invoiceFile: invoiceFileUrl // Anexa o arquivo
+                };
+                
+                await apiFetch('projects', 'PUT', payload, projectId);
+                
+                closeInvoiceUploadModal();
+                await refreshData();
+                alertUser('Nota Fiscal anexada com sucesso!', 'green');
+
+            } catch (e) {
+                alertUser("Erro ao anexar NF: " + e.message, 'red');
+            } finally {
+                submitBtn.innerText = originalText;
+                submitBtn.disabled = false;
+            }
+        };
+
+
+        function openGenericModal(resource, id, title, fields) { const item = id ? (resource === 'clients' ? clientsCache[id] : (resource === 'suppliers' ? suppliersCache[id] : servicesCache[id])) : {}; let fieldsHTML = fields.map(f => { if(f === 'type') return `<div class="mb-4"><label class="block text-sm font-bold text-gray-700 mb-1">Tipo</label><select name="type" class="w-full border border-gray-300 rounded-lg p-2 bg-white"><option value="Mão de Obra" ${item.type === 'Mão de Obra' ? 'selected' : ''}>Mão de Obra</option><option value="Equipamento" ${item.type === 'Equipamento' ? 'selected' : ''}>Equipamento</option><option value="Outros" ${item.type === 'Outros' ? 'selected' : ''}>Outros</option></select></div>`; const labelMap = { 'name': 'Nome', 'email': 'Email', 'phone': 'Telefone', 'document': 'CPF/CNPJ', 'description': 'Descrição', 'unitValue': 'Valor Unitário', 'contact': 'Contato' }; const inputType = (f === 'unitValue' || f === 'amount') ? 'number' : 'text'; const step = (f === 'unitValue' || f === 'amount') ? 'step="0.01"' : ''; return `<div class="mb-4"><label class="block text-sm font-bold text-gray-700 mb-1">${labelMap[f] || f}</label><input type="${inputType}" ${step} name="${f}" value="${item[f] || ''}" class="w-full border border-gray-300 rounded-lg p-2"></div>`; }).join(''); document.getElementById('modal-content-container').innerHTML = `<form onsubmit="handleGenericSubmit(event, '${resource}', '${id || ''}')" class="p-6"><div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold text-gray-900">${id ? 'Editar' : 'Novo'} ${title}</h3><button type="button" onclick="closeModal()" class="text-gray-400 hover:text-red-600"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>${fieldsHTML}<div class="flex justify-end space-x-3 mt-8"><button type="button" onclick="closeModal()" class="bg-gray-200 px-5 py-2 rounded-lg font-bold text-gray-700">Cancelar</button><button type="submit" class="theme-bg text-white px-5 py-2 rounded-lg font-bold">Salvar</button></div></form>`; document.getElementById('generic-modal').classList.remove('hidden'); document.getElementById('generic-modal').classList.add('flex'); }
+        window.openClientModal = (id) => openGenericModal('clients', id, 'Cliente', ['name', 'email', 'phone', 'document']); 
+        window.openSupplierModal = (id) => openGenericModal('suppliers', id, 'Fornecedor', ['name', 'type', 'document', 'contact']); 
+        window.openServiceModal = (id) => openGenericModal('services', id, 'Serviço', ['description', 'type', 'unitValue']);
+        async function handleGenericSubmit(e, resource, id) { e.preventDefault(); const data = Object.fromEntries(new FormData(e.target)); if (resource === 'services') { data.unitValue = parseFloat(data.unitValue) || 0; } try { if(id) await apiFetch(resource, 'PUT', data, id); else await apiFetch(resource, 'POST', data); await refreshData(); closeModal(); if (resource === 'clients' && tempProjectDraft) { setTimeout(() => openProjectModal(null, true), 300); } else if (resource === 'clients' && window.tempQuoteDraft) { const draft = window.tempQuoteDraft; window.tempQuoteDraft = null; setTimeout(() => openQuoteModal(null, true, draft), 300); } else if (resource === 'suppliers' && tempPaymentDraft) { setTimeout(() => openPaymentForm(tempPaymentDraft.type, tempPaymentDraft.pid, true), 300); } else { alertUser('Salvo!', 'green'); } } catch(err) {} }
+        
+        window.addNewClientFromProject = () => { const form = document.getElementById('project-form'); if(form) { const fd = new FormData(form); tempProjectDraft = Object.fromEntries(fd.entries()); tempProjectDraft.serviceItems = window.currentProjectServiceItems; } openClientModal(null); }
+        window.addNewClientFromQuote = () => { const form = document.getElementById('quote-form'); if(form) { const fd = new FormData(form); window.tempQuoteDraft = Object.fromEntries(fd.entries()); // NOVO: Captura os novos campos do draft
+            window.tempQuoteDraft.validityDays = fd.get('validityDays');
+            window.tempQuoteDraft.discountPercent = fd.get('discountPercent');
+            window.tempQuoteDraft.downPaymentPercent = fd.get('downPaymentPercent');
+            window.tempQuoteDraft.installmentsCount = fd.get('installmentsCount');
+            window.tempQuoteDraft.proposalObs = fd.get('proposalObs');
+            window.tempQuoteDraft.serviceItems = window.currentQuoteServiceItems; 
+        } openClientModal(null); }
+        window.addNewSupplierFromPayment = (type, pid) => { const form = document.querySelector('#modal-content-container form'); if(form) { const fd = new FormData(form); tempPaymentDraft = { data: Object.fromEntries(fd.entries()), type: type, pid: pid }; } openSupplierModal(null); }
+
+        window.openProjectModal = async (projectId, isRestore = false) => { 
+            const modal = document.getElementById('generic-modal'); 
+            const container = document.getElementById('modal-content-container'); 
+            let project = projectId ? window.currentProjects.find(p => p.id == projectId) : (isRestore && tempProjectDraft ? tempProjectDraft : {}); 
+            if(!projectId && !isRestore) tempProjectDraft = null; 
+            
+            // Verifica se é um projeto consolidado para impedir edição de certos campos
+            const isGrouped = project.groupedPaymentId !== null;
+            
+            const clientOptions = Object.values(clientsCache).map(c => `<option value="${c.id}" ${c.id == project.clientId ? 'selected' : ''}>${c.name}</option>`).join(''); 
+            const today = new Date().toISOString().split('T')[0]; 
+            const pDate = project.projectDate ? project.projectDate.split(' ')[0] : today; 
+            const statusOpts = ['Pendente', 'Em Andamento', 'Aguardando Pagamento', 'Concluído'].map(s => `<option value="${s}" ${project.status===s?'selected':''}>${s}</option>`).join(''); 
+            
+            // NOVO: Adiciona o botão de exclusão aqui
+            const deleteButtonHtml = projectId ? 
+                `<button type="button" onclick="confirmDeleteProject('${projectId}')" class="bg-red-100 hover:bg-red-200 text-red-700 font-bold py-2 px-6 rounded-lg flex items-center transition border border-red-200"><svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg> Excluir Projeto</button>` 
+                : '';
+            
+            const formHTML = `<form id="project-form" class="p-6 md:p-8"><div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold text-gray-900">${projectId ? 'Editar Projeto' : 'Novo Projeto'}</h3><button type="button" onclick="closeModal()" class="text-gray-400 hover:text-red-600"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div><input type="hidden" name="id" value="${projectId || ''}"><div class="grid grid-cols-1 md:grid-cols-2 gap-5"><div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Data de Início</label><input type="date" name="projectDate" value="${pDate}" required class="w-full border border-gray-300 rounded-lg p-2"></div><div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Tipo</label><select name="projectType" class="w-full border border-gray-300 rounded-lg p-2"><option value="Projeto Audiovisual" ${project.projectType!=='Freela'?'selected':''}>Projeto Audiovisual</option><option value="Freela" ${project.projectType==='Freela'?'selected':''}>Freela</option></select></div><div class="col-span-full"><label class="block text-sm font-bold text-gray-700 mb-1">Título</label><input type="text" name="title" value="${project.title||''}" required class="w-full border border-gray-300 rounded-lg p-2"></div><div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Cliente</label><div class="flex space-x-2"><select name="clientId" required class="w-full border border-gray-300 rounded-lg p-2"><option value="" disabled ${!project.clientId?'selected':''}>Selecione...</option>${clientOptions}</select><button type="button" onclick="addNewClientFromProject()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold px-3 rounded-lg" title="Novo Cliente">+</button></div></div><div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Status</label><select name="status" required class="w-full border border-gray-300 rounded-lg p-2">${statusOpts}</select></div><div class="col-span-1 flex items-center mt-2 p-2 bg-gray-50 rounded border"><input type="checkbox" id="project-requiresInvoice" name="requiresInvoice" ${project.requiresInvoice?'checked':''} class="h-5 w-5" ${isGrouped ? 'disabled' : ''}><label class="ml-2 text-sm font-medium">Requer NF?</label></div><div class="col-span-1 flex items-center mt-2 p-2 bg-gray-50 rounded border ${project.groupedPaymentId || !project.requiresInvoice?'hidden':''}" id="invoice-issued-container"><input type="checkbox" name="invoiceIssued" ${project.invoiceIssued?'checked':''} class="h-5 w-5" ${isGrouped ? 'disabled' : ''}><label class="ml-2 text-sm font-medium">NF Emitida?</label></div><div class="md:col-span-2"><label class="block text-sm font-bold text-gray-700 mb-1">Descrição</label><textarea name="description" rows="3" class="w-full border border-gray-300 rounded-lg p-2">${project.description||''}</textarea></div></div><h4 class="text-lg font-bold text-gray-800 mt-8 mb-4 border-b pb-2">Itens</h4><div id="service-items-container" class="space-y-3"></div><button type="button" onclick="addItemToProjectForm()" class="mt-4 theme-text font-bold flex items-center uppercase tracking-wide"> ${isGrouped ? '(Bloqueado - Grupo)' : '+ Adicionar Item'}</button><p class="mt-4 text-right text-sm font-bold text-gray-700">Total: <span id="project-budget-calculated" class="text-2xl text-gray-900">${formatCurrency(calculateProjectValues(project).budgetedValue)}</span></p><div class="flex justify-between space-x-3 mt-8 border-t pt-4"> ${deleteButtonHtml} <div class="flex space-x-3"><button type="button" onclick="closeModal()" class="bg-gray-200 px-5 py-2 rounded-lg font-bold">Cancelar</button><button type="submit" class="theme-bg text-white px-5 py-2 rounded-lg font-bold">Salvar Projeto</button></div></div></form>`; 
+            container.innerHTML = formHTML; 
+            modal.classList.remove('hidden'); 
+            modal.classList.add('flex'); 
+            document.getElementById('project-form').addEventListener('submit', handleProjectSubmit); 
+            
+            // Desabilita campos se for consolidado
+            if (isGrouped) {
+                document.querySelector('#project-form button[onclick="addItemToProjectForm()"]').disabled = true;
+                document.querySelector('#project-form button[type="submit"]').disabled = true;
+                document.querySelector('#project-form select[name="clientId"]').disabled = true;
+                document.querySelector('#project-form select[name="status"]').disabled = true;
+                document.querySelector('#project-form button[onclick="addNewClientFromProject()"]').disabled = true;
+            }
+
+            const requiresInvoiceCheckbox = document.getElementById('project-requiresInvoice'); 
+            const invoiceIssuedContainer = document.getElementById('invoice-issued-container'); 
+            if (requiresInvoiceCheckbox) { 
+                requiresInvoiceCheckbox.addEventListener('change', (e) => { 
+                    invoiceIssuedContainer.classList.toggle('hidden', !e.target.checked); 
+                    if (project.groupedPaymentId) { 
+                        e.target.disabled = true; 
+                        invoiceIssuedContainer.classList.add('hidden'); 
+                        alertUser("O status de NF é controlado pelo Pagamento Consolidado.", 'blue'); 
+                    } 
+                }); 
+                if (project.groupedPaymentId) { 
+                    requiresInvoiceCheckbox.disabled = true; 
+                    invoiceIssuedContainer.classList.add('hidden'); 
+                } 
+            } 
+            window.currentProjectServiceItems = project.serviceItems || []; 
+            window.renderServiceItemsForm = window.renderProjectServiceItemsForm; 
+            window.updateBudgetCalculated = window.updateProjectBudgetCalculated; 
+            window.updateItemModel = window.updateProjectItemModel; 
+            window.addItemToProjectForm = window.addProjectItem; 
+            window.removeItem = window.removeProjectItem; 
+            window.renderServiceItemsForm(); 
+            // Desabilita itens de serviço se for consolidado
+            if (isGrouped) {
+                 document.querySelectorAll('.item-row input, .item-row select, .item-row button').forEach(el => el.disabled = true);
+            }
+        };
+        window.handleProjectSubmit = async (e) => { e.preventDefault(); const fd = new FormData(e.target); const d = Object.fromEntries(fd.entries()); if (!d.clientId) return alertUser("Selecione um cliente.", 'red'); const payload = { id: d.id, clientId: d.clientId, title: d.title, description: d.description, status: d.status, projectDate: d.projectDate, projectType: d.projectType, requiresInvoice: fd.has('requiresInvoice')?1:0, invoiceIssued: fd.has('invoiceIssued')?1:0, serviceItems: window.currentProjectServiceItems.map(i=>({serviceId:i.serviceId||"", description:i.description||"Item", quantity:parseFloat(i.quantity)||0, unitValue:parseFloat(i.unitValue)||0, totalValue:parseFloat(i.totalValue)||0})) }; try { if(d.id) await apiFetch('projects', 'PUT', payload, d.id); else await apiFetch('projects', 'POST', payload); window.tempProjectDraft = null; await refreshData(); closeModal(); } catch(e) {} };
+        window.renderProjectServiceItemsForm = () => { const container = document.getElementById('service-items-container'); if (container.children.length !== window.currentProjectServiceItems.length) { const serviceOpts = Object.values(servicesCache).map(s => `<option value="${s.id}" data-val="${s.unitValue}">${s.description} (${formatCurrency(s.unitValue)})</option>`).join(''); container.innerHTML = window.currentProjectServiceItems.map((item, idx) => `<div class="grid grid-cols-12 gap-2 bg-gray-50 p-2 rounded border items-end item-row" id="item-row-p-${idx}"><div class="col-span-4"><label class="text-xs font-bold text-gray-500">Item</label><select onchange="updateProjectItemDetails(this, ${idx})" class="w-full text-sm p-1 border rounded"><option value="">Customizado</option>${serviceOpts.replace(`value="${item.serviceId}"`, `value="${item.serviceId}" selected`)}</select><input type="text" value="${item.description}" id="item-desc-p-${idx}" oninput="updateProjectItemModel(${idx}, 'description', this.value)" class="w-full text-sm p-1 border rounded mt-1" placeholder="Descrição"></div><div class="col-span-2"><label class="text-xs font-bold text-gray-500">Qtd</label><input type="number" value="${item.quantity}" oninput="updateProjectItemModel(${idx}, 'quantity', this.value)" class="w-full text-sm p-1 border rounded"></div><div class="col-span-3"><label class="text-xs font-bold text-gray-500">Unit (R$)</label><input type="number" step="0.01" value="${item.unitValue}" id="item-unit-p-${idx}" oninput="updateProjectItemModel(${idx}, 'unitValue', this.value)" class="w-full text-sm p-1 border rounded"></div><div class="col-span-2"><label class="text-xs font-bold text-gray-500">Total</label><div class="text-sm font-bold text-gray-700 pt-1" id="item-total-p-${idx}">${formatCurrency(item.totalValue)}</div></div><div class="col-span-1"><button type="button" onclick="removeProjectItem(${idx})" class="text-red-500 hover:text-red-700 font-bold">X</button></div></div>`).join(''); } updateProjectBudgetCalculated(); };
+        window.updateProjectItemDetails = (el, idx) => { const opt = el.options[el.selectedIndex]; const item = window.currentProjectServiceItems[idx]; const descInput = document.getElementById(`item-desc-p-${idx}`); const unitInput = document.getElementById(`item-unit-p-${idx}`); const totalEl = document.getElementById(`item-total-p-${idx}`); if(el.value) { const safeVal = parseFloat(opt.getAttribute('data-val')) || 0; item.serviceId = el.value; item.description = opt.text.split(' (')[0]; item.unitValue = safeVal; item.quantity = 1; item.totalValue = safeVal * 1; if(descInput) descInput.value = item.description; if(unitInput) unitInput.value = safeVal.toFixed(2); if(totalEl) totalEl.textContent = formatCurrency(item.totalValue); } else { item.serviceId = ""; item.description = ""; item.unitValue = 0; item.quantity = 1; item.totalValue = 0; if(descInput) descInput.value = ""; if(unitInput) unitInput.value = "0.00"; if(totalEl) totalEl.textContent = formatCurrency(0); } window.updateProjectBudgetCalculated(); };
+        window.updateProjectItemModel = (idx, field, val) => { const item = window.currentProjectServiceItems[idx]; item[field] = field === 'description' ? val : parseFloat(val || 0); item.totalValue = (parseFloat(item.quantity) || 0) * (parseFloat(item.unitValue) || 0); const totalEl = document.getElementById(`item-total-p-${idx}`); if(totalEl) totalEl.textContent = formatCurrency(item.totalValue); updateProjectBudgetCalculated(); };
+        window.addProjectItem = () => { window.currentProjectServiceItems.push({serviceId:"", description:"", quantity:1, unitValue:0, totalValue:0}); renderProjectServiceItemsForm(); };
+        window.removeProjectItem = (idx) => { window.currentProjectServiceItems.splice(idx, 1); renderProjectServiceItemsForm(); };
+        window.updateProjectBudgetCalculated = () => { const total = window.currentProjectServiceItems.reduce((acc, i) => acc + (parseFloat(i.totalValue) || 0), 0); document.getElementById('project-budget-calculated').textContent = formatCurrency(total); };
+
+        window.openQuoteModal = async (projectId, isRestore = false, draft = null) => { 
+            const modal = document.getElementById('generic-modal'); 
+            const container = document.getElementById('modal-content-container'); 
+            
+            // CORREÇÃO v11: Uso dos novos campos
+            let quote = projectId ? window.currentQuotes.find(q => q.id == projectId) : (isRestore && draft ? draft : {}); 
+            if(!projectId && !isRestore) window.tempQuoteDraft = null; 
+            
+            const clientOptions = Object.values(clientsCache).map(c => `<option value="${c.id}" ${c.id == quote.clientId ? 'selected' : ''}>${c.name}</option>`).join(''); 
+            const today = new Date().toISOString().split('T')[0]; 
+            const qDate = quote.executionDate ? quote.executionDate.split(' ')[0] : today; 
+            const statusOpts = ['Rascunho', 'Enviado', 'Aprovado', 'Rejeitado'].map(s => `<option value="${s}" ${quote.status===s?'selected':''}>${s}</option>`).join(''); 
+            
+            // Novos campos com valores padrão
+            const validityDays = quote.validityDays !== undefined ? quote.validityDays : 15;
+            const discountPercent = quote.discountPercent !== undefined ? quote.discountPercent : 10.00;
+            const downPaymentPercent = quote.downPaymentPercent !== undefined ? quote.downPaymentPercent : 40.00;
+            const installmentsCount = quote.installmentsCount !== undefined ? quote.installmentsCount : 12;
+            const proposalObs = quote.proposalObs !== undefined ? quote.proposalObs : '';
+
+            // V21: Rodapé com classes responsivas para evitar sobreposição de botões
+            const formHTML = `<form id="quote-form" class="p-6 md:p-8"><div class="flex justify-between items-center mb-6"><h3 class="text-xl font-bold text-gray-900">${projectId ? 'Editar Orçamento' : 'Novo Orçamento'}</h3><button type="button" onclick="closeModal()" class="text-gray-400 hover:text-red-600"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div><input type="hidden" name="id" value="${projectId || ''}"><div class="grid grid-cols-1 md:grid-cols-2 gap-5"><div class="col-span-full"><label class="block text-sm font-bold text-gray-700 mb-1">Título do Orçamento</label><input type="text" name="title" value="${quote.title||''}" required class="w-full border border-gray-300 rounded-lg p-2"></div><div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Cliente</label><div class="flex space-x-2"><select name="clientId" required class="w-full border border-gray-300 rounded-lg p-2"><option value="" disabled ${!quote.clientId?'selected':''}>Selecione...</option>${clientOptions}</select><button type="button" onclick="addNewClientFromQuote()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold px-3 rounded-lg" title="Novo Cliente">+</button></div></div><div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Data da Execução</label><input type="date" name="executionDate" value="${qDate}" class="w-full border border-gray-300 rounded-lg p-2"></div><div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Status</label><select name="status" required class="w-full border border-gray-300 rounded-lg p-2">${statusOpts}</select></div><div class="md:col-span-2"><label class="block text-sm font-bold text-gray-700 mb-1">Descrição (Interna)</label><textarea name="description" rows="3" class="w-full border border-gray-300 rounded-lg p-2">${quote.description||''}</textarea></div></div><h4 class="text-lg font-bold text-gray-800 mt-8 mb-4 border-b pb-2">Opções da Proposta</h4><div class="grid grid-cols-2 md:grid-cols-4 gap-5"><div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Validade (Dias)</label><input type="number" name="validityDays" value="${validityDays}" required class="w-full border border-gray-300 rounded-lg p-2 text-center"></div><div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Desc. à Vista (%)</label><input type="number" step="0.01" name="discountPercent" value="${discountPercent}" required class="w-full border border-gray-300 rounded-lg p-2 text-center"></div><div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Entrada (%)</label><input type="number" step="0.01" name="downPaymentPercent" value="${downPaymentPercent}" required class="w-full border border-gray-300 rounded-lg p-2 text-center"></div><div class="col-span-1"><label class="block text-sm font-bold text-gray-700 mb-1">Parcelas (Max)</label><input type="number" name="installmentsCount" value="${installmentsCount}" required class="w-full border border-gray-300 rounded-lg p-2 text-center"></div><div class="md:col-span-4"><label class="block text-sm font-bold text-gray-700 mb-1">Observação da Proposta (Cliente)</label><textarea name="proposalObs" rows="3" class="w-full border border-gray-300 rounded-lg p-2" placeholder="Ex: Valores não incluem serviços de alvenaria e elétrica.">${proposalObs}</textarea></div></div><h4 class="text-lg font-bold text-gray-800 mt-8 mb-4 border-b pb-2">Itens</h4><div id="quote-service-items-container" class="space-y-3"></div><button type="button" onclick="addItemToQuoteForm()" class="mt-4 theme-text font-bold flex items-center uppercase tracking-wide">+ Adicionar Item</button><p class="mt-4 text-right text-sm font-bold text-gray-700">Total: <span id="quote-budget-calculated" class="text-2xl text-gray-900">${formatCurrency(calculateProjectValues(quote).budgetedValue)}</span></p><div class="flex flex-col sm:flex-row justify-between space-x-0 sm:space-x-3 mt-8 border-t pt-4 gap-2"> ${projectId ? `<button type="button" onclick="deleteQuote('${projectId}'); closeModal();" class="text-red-500 hover:text-red-700 text-sm font-bold uppercase tracking-wider w-full sm:w-auto">Excluir este Orçamento</button>` : ''} <div class="flex space-x-3 w-full sm:w-auto"><button type="button" onclick="closeModal()" class="bg-gray-200 px-5 py-2 rounded-lg font-bold w-full sm:w-auto text-gray-700">Cancelar</button><button type="submit" class="theme-bg text-white px-5 py-2 rounded-lg font-bold w-full sm:w-auto">Salvar Orçamento</button></div></div></form>`; 
+            container.innerHTML = formHTML; 
+            modal.classList.remove('hidden'); 
+            modal.classList.add('flex'); 
+            document.getElementById('quote-form').addEventListener('submit', handleQuoteSubmit); 
+            window.currentQuoteServiceItems = quote.serviceItems || []; 
+            window.renderServiceItemsForm = window.renderQuoteServiceItemsForm; 
+            window.updateBudgetCalculated = window.updateQuoteBudgetCalculated; 
+            window.updateItemModel = window.updateQuoteItemModel; 
+            window.addItemToProjectForm = window.addItemToQuoteForm; 
+            window.removeItem = window.removeQuoteItem; 
+            window.renderServiceItemsForm(); 
+        };
+        window.handleQuoteSubmit = async (e) => { 
+            e.preventDefault(); 
+            const fd = new FormData(e.target); 
+            const d = Object.fromEntries(fd.entries()); 
+            if (!d.clientId) return alertUser("Selecione um cliente.", 'red'); 
+            
+            // CORREÇÃO v11: Adicionado novos campos ao payload
+            const payload = { 
+                id: d.id, 
+                status: d.status,
+                clientId: d.clientId,
+                title: d.title,
+                description: d.description,
+                executionDate: d.executionDate,
+                validityDays: parseInt(d.validityDays) || 15,
+                discountPercent: parseFloat(d.discountPercent) || 10.00,
+                downPaymentPercent: parseFloat(d.downPaymentPercent) || 40.00,
+                installmentsCount: parseInt(d.installmentsCount) || 12,
+                proposalObs: d.proposalObs,
+                serviceItems: window.currentQuoteServiceItems.map(i=>({
+                    serviceId:i.serviceId||"", 
+                    description:i.description||"Item", 
+                    quantity:parseFloat(i.quantity)||0, 
+                    unitValue:parseFloat(i.unitValue)||0, 
+                    totalValue:parseFloat(i.totalValue)||0
+                })) 
+            }; 
+            
+            const btn = e.target.querySelector('button[type="submit"]');
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = "Salvando...";
+
+            try { 
+                if(d.id) await apiFetch('quotes', 'PUT', payload, d.id); 
+                else await apiFetch('quotes', 'POST', payload); 
+                window.tempQuoteDraft = null; 
+                await refreshData(); 
+                closeModal(); 
+                alertUser('Orçamento salvo!', 'green'); 
+            } catch(e) {
+                console.error("Erro ao salvar orçamento:", e);
+                alertUser("Erro ao salvar orçamento: " + e.message, "red");
+            } finally {
+                btn.disabled = false;
+                btn.innerText = originalText;
+            }
+        };
+        // V21/V22: Corrigido para ser 100% responsivo nos itens da proposta, usando grid responsivo
+        window.renderQuoteServiceItemsForm = () => { 
+            const container = document.getElementById('quote-service-items-container'); 
+            if (container.children.length !== window.currentQuoteServiceItems.length) { 
+                const serviceOpts = Object.values(servicesCache).map(s => `<option value="${s.id}" data-val="${s.unitValue}">${s.description} (${formatCurrency(s.unitValue)})</option>`).join(''); 
+                
+                // Novo Grid: 12 colunas totais para garantir que os campos caibam (empilhamento de 4 + 4 + 4 + 1 em mobile)
+                container.innerHTML = window.currentQuoteServiceItems.map((item, idx) => `
+                    <div class="grid grid-cols-12 gap-2 bg-gray-50 p-2 rounded border items-start item-row" id="item-row-q-${idx}">
+                        <div class="col-span-12 sm:col-span-5">
+                            <label class="block text-xs font-bold text-gray-500">Item</label>
+                            <select onchange="updateQuoteItemDetails(this, ${idx})" class="w-full text-sm p-1 border rounded">
+                                <option value="">Customizado</option>${serviceOpts.replace(`value="${item.serviceId}"`, `value="${item.serviceId}" selected`)}
+                            </select>
+                            <input type="text" value="${item.description}" id="item-desc-q-${idx}" oninput="updateQuoteItemModel(${idx}, 'description', this.value)" class="w-full text-sm p-1 border rounded mt-1" placeholder="Descrição">
+                        </div>
+                        
+                        <div class="col-span-4 sm:col-span-2">
+                            <label class="block text-xs font-bold text-gray-500">Qtd</label>
+                            <input type="number" value="${item.quantity}" oninput="updateQuoteItemModel(${idx}, 'quantity', this.value)" class="w-full text-sm p-1 border rounded">
+                        </div>
+                        
+                        <div class="col-span-4 sm:col-span-3">
+                            <label class="block text-xs font-bold text-gray-500">Unit (R$)</label>
+                            <input type="number" step="0.01" value="${item.unitValue}" id="item-unit-q-${idx}" oninput="updateQuoteItemModel(${idx}, 'unitValue', this.value)" class="w-full text-sm p-1 border rounded">
+                        </div>
+                        
+                        <div class="col-span-4 sm:col-span-2">
+                            <label class="block text-xs font-bold text-gray-500">Total</label>
+                            <div class="text-sm font-bold text-gray-700 pt-1" id="item-total-q-${idx}">${formatCurrency(item.totalValue)}</div>
+                        </div>
+                        
+                        <div class="col-span-2 sm:col-span-1 flex justify-end items-end h-full pt-1">
+                            <button type="button" onclick="removeQuoteItem(${idx})" class="text-red-500 hover:text-red-700 font-bold p-1">X</button>
+                        </div>
+                    </div>`).join(''); 
+            } 
+            updateQuoteBudgetCalculated(); 
+        };
+        window.updateQuoteItemDetails = (el, idx) => { const opt = el.options[el.selectedIndex]; const item = window.currentQuoteServiceItems[idx]; const descInput = document.getElementById(`item-desc-q-${idx}`); const unitInput = document.getElementById(`item-unit-q-${idx}`); const totalEl = document.getElementById(`item-total-q-${idx}`); if(el.value) { const safeVal = parseFloat(opt.getAttribute('data-val')) || 0; item.serviceId = el.value; item.description = opt.text.split(' (')[0]; item.unitValue = safeVal; item.quantity = 1; item.totalValue = safeVal * 1; if(descInput) descInput.value = item.description; if(unitInput) unitInput.value = safeVal.toFixed(2); if(totalEl) totalEl.textContent = formatCurrency(item.totalValue); } else { item.serviceId = ""; item.description = ""; item.unitValue = 0; item.quantity = 1; item.totalValue = 0; if(descInput) descInput.value = ""; if(unitInput) unitInput.value = "0.00"; if(totalEl) totalEl.textContent = formatCurrency(0); } window.updateQuoteBudgetCalculated(); };
+        window.updateQuoteItemModel = (idx, field, val) => { const item = window.currentQuoteServiceItems[idx]; item[field] = field === 'description' ? val : parseFloat(val || 0); item.totalValue = (parseFloat(item.quantity) || 0) * (parseFloat(item.unitValue) || 0); const totalEl = document.getElementById(`item-total-q-${idx}`); if(totalEl) totalEl.textContent = formatCurrency(item.totalValue); updateQuoteBudgetCalculated(); };
+        window.addItemToQuoteForm = () => { window.currentQuoteServiceItems.push({serviceId:"", description:"", quantity:1, unitValue:0, totalValue:0}); renderQuoteServiceItemsForm(); };
+        window.removeQuoteItem = (idx) => { window.currentQuoteServiceItems.splice(idx, 1); renderQuoteServiceItemsForm(); };
+        window.updateQuoteBudgetCalculated = () => { const total = window.currentQuoteServiceItems.reduce((acc, i) => acc + (parseFloat(i.totalValue) || 0), 0); document.getElementById('quote-budget-calculated').textContent = formatCurrency(total); };
+        
+        window.convertQuoteToProject = async (quoteId) => { if(!confirm("Tem certeza que deseja converter este Orçamento para um Projeto? Ele será EXCLUÍDO permanentemente da lista de orçamentos.")) return; const buttons = document.querySelectorAll('button'); buttons.forEach(b => b.disabled = true); try { const result = await apiFetch('convert_quote', 'POST', { quoteId }); alertUser(result.message || "Conversão realizada com sucesso!", 'green'); closeProposalModal(); await refreshData(); switchTab('projects'); } catch (e) { } finally { buttons.forEach(b => b.disabled = false); } };
+        window.openPaymentForm = (type, pid, editId = null) => { const isClient = type === 'clientPayments'; const suppliersOpts = Object.values(suppliersCache).map(s => `<option value="${s.id}">${s.name}</option>`).join(''); const project = window.currentProjects.find(p => p.id == pid); if (isClient && project && project.groupedPaymentId) { alertUser("Este projeto foi pago em grupo. Edite ou exclua o Pagamento Consolidado.", 'red'); return; } let savedData = {}; if (editId && window.currentProjects) { const proj = window.currentProjects.find(p => p.id == pid); if (proj) { const paymentList = isClient ? proj.clientPayments : proj.operationalPayments; const found = paymentList.find(p => p.id == editId); if (found) { savedData = { amount: found.amount, date: found.date, method: found.method, description: found.description, supplierId: found.supplierId, installments: found.installments }; } } } else if (tempPaymentDraft) { savedData = tempPaymentDraft.data; tempPaymentDraft = null; } const valAmount = savedData.amount || ''; const valDate = savedData.date || ''; const valMethod = savedData.method || 'Pix'; const valSupplier = savedData.supplierId || ''; const valInstallments = savedData.installments || '1'; const valDescription = savedData.description || ''; const title = editId ? 'Editar Pagamento' : 'Novo Pagamento'; const formAction = editId ? `handlePaymentSubmit(event, '${type}', '${pid}', '${editId}')` : `handlePaymentSubmit(event, '${type}', '${pid}')`; document.getElementById('modal-content-container').innerHTML = `<form onsubmit="${formAction}" class="p-6"><div class="flex justify-between items-center mb-6"><h3 class="font-bold text-xl text-gray-900">${title}</h3><button type="button" onclick="closeModal()" class="text-gray-400 hover:text-red-600"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div><div class="space-y-4"><input type="text" name="description" value="${valDescription}" placeholder="Descrição (Ex: 1ª Parcela / Equipamento X)" class="w-full border border-gray-300 p-3 rounded-lg"><input type="number" step="0.01" name="amount" value="${valAmount}" placeholder="Valor (R$)" required class="w-full border border-gray-300 p-3 rounded-lg"><input type="date" name="date" value="${valDate}" required class="w-full border border-gray-300 p-3 rounded-lg"><select name="method" class="w-full border border-gray-300 p-3 rounded-lg bg-white"><option ${valMethod === 'Pix' ? 'selected' : ''}>Pix</option><option ${valMethod === 'Boleto' ? 'selected' : ''}>Boleto</option><option ${valMethod === 'Dinheiro' ? 'selected' : ''}>Dinheiro</option><option ${valMethod === 'Cartão de Crédito' ? 'selected' : ''}>Cartão de Crédito</option></select>${!isClient ? `<div class="flex space-x-2"><select name="supplierId" required class="w-full border border-gray-300 p-3 rounded-lg bg-white"><option value="" disabled ${!valSupplier ? 'selected' : ''}>Selecione um fornecedor...</option>${suppliersOpts.replace(`value="${valSupplier}"`, `value="${valSupplier}" selected`)}</select><button type="button" onclick="addNewSupplierFromPayment('${type}', '${pid}')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold px-3 rounded-lg flex items-center justify-center text-xl" title="Novo Fornecedor">+</button></div>` : ''}${isClient ? `<input type="number" name="installments" value="${valInstallments}" placeholder="Parcelas" class="w-full border border-gray-300 p-3 rounded-lg">` : ''}<div class="pt-2 border-t"><label class="block text-sm font-bold text-gray-500 mb-1">Comprovante (Opcional)</label><input type="file" name="receiptFile" class="w-full text-sm">${editId ? '<p class="text-xs text-gray-400 mt-1">Deixe em branco para manter o atual.</p>' : ''}</div></div><div class="flex justify-end space-x-3 mt-8"><button type="button" onclick="closeModal()" class="bg-gray-200 px-5 py-2 rounded-lg font-bold text-gray-700">Cancelar</button><button type="submit" class="theme-bg text-white px-5 py-2 rounded-lg font-bold">Salvar</button></div></form>`; document.getElementById('generic-modal').classList.remove('hidden'); document.getElementById('generic-modal').classList.add('flex'); };
+        window.handlePaymentSubmit = async (e, type, pid, editId = null) => { e.preventDefault(); const btn = e.target.querySelector('button[type="submit"]'); const originalText = btn.innerHTML; btn.disabled = true; btn.innerHTML = "Salvando..."; try { const formData = new FormData(e.target); let receiptLink = null; const file = formData.get('receiptFile'); if (file && file.size > 0) { receiptLink = await uploadFile(file); } const data = Object.fromEntries(formData.entries()); data.installments = data.installments || 1; data.supplierId = data.supplierId || null; if (editId) { if (receiptLink) { data.receiptLink = receiptLink; } else if (file && file.size === 0) { data.receiptLink = null; } else { delete data.receiptLink; } } else { data.receiptLink = receiptLink; } if (editId) { await apiFetch('payments', 'PUT', { projectId: pid, arrayName: type, paymentData: data }, editId); } else { await apiFetch('payments', 'POST', { projectId: pid, arrayName: type, paymentData: data }); } closeModal(); await refreshData(); } catch (err) { alertUser("Erro: " + err.message, 'red'); btn.disabled = false; btn.innerHTML = originalText; } };
+        
+        window.openGroupedPaymentModal = () => { const form = document.getElementById('grouped-payment-form'); const submitBtn = form.querySelector('button[type="submit"]'); form.reset(); form.querySelector('input[name="id"]').value = ''; const modalTitle = form.querySelector('#grouped-payment-modal-title'); if (modalTitle) { modalTitle.textContent = "Registrar Recebimento Consolidado"; } submitBtn.textContent = "Salvar"; form.querySelector('input[name="date"]').value = new Date().toISOString().split('T')[0]; const clientIdSelect = form.querySelector('select[name="clientId"]'); if (clientIdSelect) clientIdSelect.disabled = false; const projectsContainer = document.getElementById('grouped-projects-container'); if (projectsContainer) projectsContainer.classList.remove('hidden'); document.getElementById('grouped-payment-list').innerHTML = '<p class="text-gray-500 text-sm italic text-center">Selecione um cliente para carregar os projetos.</p>'; window.updateGroupedPaymentTotal(); const clientSelect = document.getElementById('group-client-select'); if (clientSelect) clientSelect.innerHTML = '<option value="">Selecione um cliente...</option>' + Object.values(clientsCache).map(c => `<option value="${c.id}">${c.name}</option>`).join(''); document.getElementById('grouped-payment-modal').classList.remove('hidden'); document.getElementById('grouped-payment-modal').classList.add('flex'); form.onsubmit = handleGroupedPaymentSubmit; const listContainer = document.getElementById('grouped-payment-list'); listContainer.onchange = updateGroupedPaymentTotal; };
+        window.updateGroupedPaymentTotal = () => { const checkboxes = document.querySelectorAll('input[name="groupedProjectIds"]:checked'); let totalBudgeted = 0; checkboxes.forEach(cb => { totalBudgeted += parseFloat(cb.getAttribute('data-budget')) || 0; }); const totalEl = document.getElementById('group-selected-budget-total'); if(totalEl) totalEl.textContent = `Total Selecionado: ${formatCurrency(totalBudgeted)}`; };
+        window.filterProjectsForGroupedPayment = () => { const clientId = document.getElementById('group-client-select').value; const list = document.getElementById('grouped-payment-list'); const totalEl = document.getElementById('group-selected-budget-total'); if (!clientId) { list.innerHTML = '<p class="text-gray-500 text-sm italic text-center">Selecione um cliente para carregar os projetos.</p>'; if(totalEl) totalEl.textContent = 'Total Selecionado: R$ 0,00'; return; } const clientProjects = window.currentProjects .filter(p => p.clientId == clientId && !p.groupedPaymentId) .sort((a, b) => new Date(a.projectDate) - new Date(b.projectDate)); if (clientProjects.length === 0) { list.innerHTML = `<p class="text-gray-500 text-sm italic text-center">Nenhum projeto pendente para ${clientsCache[clientId]?.name}.</p>`; if(totalEl) totalEl.textContent = 'Total Selecionado: R$ 0,00'; return; } list.innerHTML = clientProjects.map(p => { const financials = calculateProjectValues(p); const dateStr = p.projectDate ? new Date(p.projectDate).toLocaleDateString('pt-BR', {timeZone: 'UTC'}) : 'Sem data'; return ` <div class="flex items-center space-x-3 bg-white p-3 rounded-lg border border-gray-200 hover:bg-gray-100 transition"> <input type="checkbox" value="${p.id}" id="group-p-${p.id}" name="groupedProjectIds" data-budget="${financials.budgetedValue}" class="project-checkbox h-5 w-5 theme-text rounded"> <label for="group-p-${p.id}" class="text-sm text-gray-800 flex-1 cursor-pointer flex justify-between"> <span class="font-bold">${p.title}</span> <span class="text-xs text-gray-500">${dateStr} - ${formatCurrency(financials.budgetedValue)}</span> </label> </div>`; }).join(''); updateGroupedPaymentTotal(); };
+        window.handleGroupedPaymentSubmit = async (e) => { e.preventDefault(); const form = e.target; const groupedPaymentId = form.querySelector('input[name="id"]').value; const method = groupedPaymentId ? 'PUT' : 'POST'; const formData = new FormData(form); const isEdit = method === 'PUT'; let selectedProjectIds = []; if (!isEdit) { selectedProjectIds = Array.from(document.querySelectorAll('input[name="groupedProjectIds"]:checked')).map(cb => cb.value); if (!selectedProjectIds.length) return alertUser("Selecione pelo menos um projeto.", "red"); } const clientId = form.querySelector('select[name="clientId"]').value; if (!clientId) return alertUser("Selecione o cliente.", "red"); const btn = form.querySelector('button[type="submit"]'); const originalText = btn.innerHTML; btn.innerText = "Processando..."; btn.disabled = true; try { let receiptLink = null; let invoiceFile = null; const receiptFile = formData.get('receiptFile'); if (receiptFile && receiptFile.size > 0) receiptLink = await uploadFile(receiptFile); const invoiceFileObj = formData.get('invoiceFile'); if (invoiceFileObj && invoiceFileObj.size > 0) invoiceFile = await uploadFile(invoiceFileObj); const groupName = formData.get('groupName'); const optionalDescription = formData.get('description'); const payload = { clientId: clientId, amount: parseFloat(formData.get('amount')) || 0, date: formData.get('date'), method: formData.get('method'), groupName: groupName, description: optionalDescription, invoiceFile: invoiceFile, receiptLink: receiptLink, ...(method === 'POST' && { projectIds: selectedProjectIds }), }; if (isEdit) { await apiFetch('payments_group', 'PUT', payload, groupedPaymentId); } else { await apiFetch('payments_group', 'POST', payload); } alertUser(`Recebimento Consolidado ${isEdit ? 'atualizado' : 'registrado'} com sucesso!`, "green"); document.getElementById('grouped-payment-modal').classList.add('hidden'); document.getElementById('grouped-payment-modal').classList.remove('flex'); await refreshData(); } catch (err) { alertUser("Erro ao registrar pagamento Consolidado: " + err.message, "red"); } finally { btn.innerText = originalText; btn.disabled = false; } };
+        window.deleteGroupedPayment = async (groupedPaymentId) => { if (!confirm('Excluir este Pagamento Consolidado? Todos os projetos voltarão ao status "Aguardando Pagamento" e seus status de NF serão removidos.')) return; try { await apiFetch('payments_group', 'DELETE', null, groupedPaymentId); closeDetailModal(); await refreshData(); alertUser("Pagamento Consolidado desfeito.", 'green'); } catch(e) {} };
+        window.openGroupedPaymentEditModal = (groupedPaymentId) => { const project = window.currentProjects.find(p => p.groupedPaymentId == groupedPaymentId); const group = project?.groupedPayment; if (!group) { alertUser("Agrupamento não encontrado.", 'red'); return; } const form = document.getElementById('grouped-payment-form'); const submitBtn = form.querySelector('button[type="submit"]'); form.reset(); form.querySelector('input[name="id"]').value = groupedPaymentId; const modalTitle = form.querySelector('#grouped-payment-modal-title'); if (modalTitle) { modalTitle.textContent = "Editar Recebimento Consolidado"; } submitBtn.textContent = "Salvar Alterações"; const clientIdSelect = form.querySelector('select[name="clientId"]'); if (clientIdSelect) clientIdSelect.value = group.clientId; form.querySelector('input[name="groupName"]').value = group.groupName || ''; form.querySelector('input[name="amount"]').value = group.amount; form.querySelector('input[name="date"]').value = group.date ? group.date.split(' ')[0] : new Date().toISOString().split('T')[0]; form.querySelector('select[name="method"]').value = group.method; form.querySelector('input[name="description"]').value = group.description || ''; if (clientIdSelect) clientIdSelect.disabled = true; const projectsContainer = document.getElementById('grouped-projects-container'); if (projectsContainer) projectsContainer.classList.add('hidden'); document.getElementById('grouped-payment-modal').classList.remove('hidden'); document.getElementById('grouped-payment-modal').classList.add('flex'); form.onsubmit = handleGroupedPaymentSubmit; };
+        window.deletePayment = async (id, type) => { if(confirm('Excluir pagamento?')) { try { await apiFetch('payments', 'DELETE', null, id, { payment_id: id, type: type }); await refreshData(); } catch(e) {} } };
+        window.confirmDeleteProject = async (id) => { 
+            if(confirm('Tem certeza que deseja EXCLUIR permanentemente este Projeto e todos os seus itens, receitas e despesas vinculadas?')) { 
+                try {
+                    await apiFetch('projects', 'DELETE', null, id); 
+                    closeModal(); // Fecha a modal de edição
+                    closeDetailModal(); // Se a modal de detalhe estiver aberta
+                    await refreshData();
+                    alertUser('Projeto excluído com sucesso.', 'green'); 
+                } catch(e) {
+                    alertUser('Erro ao excluir projeto: ' + e.message, 'red');
+                }
+            } 
+        };
+        window.openDetailModal = (id) => { const p = window.currentProjects.find(x => x.id == id); if (!p) return; window.currentDetailProjectId = id; document.getElementById('detail-project-title').textContent = `Detalhes: ${p.title}`; renderProjectDetails(p); document.getElementById('project-detail-modal').classList.remove('hidden'); document.getElementById('project-detail-modal').classList.add('flex'); };
+        window.deleteQuote = async (id) => { if(confirm('Apagar orçamento?')) { await apiFetch('quotes', 'DELETE', null, id); await refreshData(); } };
+        
+        // CORREÇÃO: Atualiza renderProjectDetails para incluir o botão de NF para projetos individuais
+        window.renderProjectDetails = (project) => { 
+            const f = calculateProjectValues(project); 
+            let invoiceHtml = ''; 
+            let paymentSection = ''; 
+            
+            // NOVO: Adiciona o botão de upload de NF para projetos NÃO consolidados
+            const isGrouped = project.groupedPaymentId !== null;
+            const uploadButtonHtml = isGrouped ? 
+                '' : 
+                `<button onclick="openInvoiceUploadModal('${project.id}')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-sm flex items-center transition">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    ${project.invoiceFile ? 'Ver/Substituir NF' : 'Anexar NF'}
+                </button>`;
+
+            if (isGrouped && project.groupedPayment) { 
+                const group = project.groupedPayment; 
+                const totalBudgeted = project.serviceItems.reduce((sum, i) => sum + (parseFloat(i.totalValue) || 0), 0); 
+                const groupName = group.groupName || 'Pagamento Consolidado'; 
+                const optionalDescription = group.description || ''; 
+                invoiceHtml = ` 
+                    <div class="mt-6 p-4 bg-purple-50 border border-purple-200 rounded-lg flex justify-between items-center flex-wrap"> 
+                        <div class="mb-2 w-full"><h4 class="font-bold text-purple-800 flex items-center">${groupName} #${project.groupedPaymentId} <span class="text-xs ml-2 text-gray-500">Orçamento Projeto: ${formatCurrency(totalBudgeted)}</span></h4></div> 
+                        <div class="flex-1 min-w-[50%] space-y-1 text-sm text-purple-700"> 
+                            <p><strong>Recebido Total Grupo:</strong> ${formatCurrency(group.amount)} em ${formatDateForDisplay(group.date)}</p> 
+                            <p><strong>Método:</strong> ${group.method}</p> ${optionalDescription ? `<p><strong>Desc. Opcional:</strong> ${optionalDescription}</p>` : ''} 
+                            ${group.invoiceFile ? `<p class="mt-1"><a href="${group.invoiceFile}" target="_blank" class="text-blue-600 hover:underline font-bold">Ver Nota Fiscal Agrupada 📎</a></p>` : ''} 
+                            ${group.receiptLink ? `<p><a href="${group.receiptLink}" target="_blank" class="text-blue-600 hover:underline font-bold">Ver Comprovante Consolidado 🧾</a></p>` : ''} 
+                        </div> 
+                        <div class="flex flex-col md:flex-row gap-2 mt-2 md:mt-0"> 
+                            <button onclick="openGroupedPaymentEditModal('${project.groupedPaymentId}')" class="bg-purple-200 hover:bg-purple-300 text-purple-800 font-bold py-2 px-4 rounded-lg text-sm flex items-center transition border border-purple-300">Editar Grupo</button> 
+                            <button onclick="deleteGroupedPayment('${project.groupedPaymentId}')" class="bg-red-100 hover:bg-red-200 text-red-700 font-bold py-2 px-4 rounded-lg text-sm flex items-center transition border border-red-200">Desfazer Grupo</button> 
+                        </div> 
+                    </div>`; 
+                paymentSection = ` 
+                    <div class="mb-8 mt-6"> 
+                        <div class="flex justify-between items-center mb-4 pb-2 border-b border-gray-200"> 
+                            <h4 class="font-bold text-gray-800 text-lg">Receitas</h4> 
+                            <span class="text-xs text-red-500 font-bold">Bloqueado (Pagamento Consolidado)</span> 
+                        </div> 
+                        <p class="text-gray-400 text-sm italic text-center py-4">O recebimento é gerenciado pelo grupo. <button onclick="deleteGroupedPayment('${project.groupedPaymentId}')" class="text-blue-500 hover:underline font-medium">Clique para desfazer o grupo.</button></p> 
+                    </div>`; 
+            } else { 
+                // NOVO: Bloco de NF para projetos individuais
+                if (project.invoiceFile) { 
+                    invoiceHtml = ` 
+                        <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg flex justify-between items-center"> 
+                            <div> 
+                                <h4 class="font-bold text-blue-800">Nota Fiscal Emitida (Individual)</h4> 
+                                <p class="text-xs text-blue-600"><a href="${project.invoiceFile}" target="_blank" class="hover:underline">Arquivo vinculado</a> ao projeto.</p> 
+                            </div> 
+                            ${uploadButtonHtml}
+                        </div>`; 
+                } else if (project.requiresInvoice) { 
+                    invoiceHtml = `
+                        <div class="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex justify-between items-center">
+                            <p class="text-yellow-800 font-bold text-sm">Nota Fiscal Pendente de Emissão/Anexo</p>
+                            ${uploadButtonHtml}
+                        </div>`;
+                } else {
+                     invoiceHtml = `
+                        <div class="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg flex justify-between items-center">
+                            <p class="text-gray-800 font-bold text-sm">Gerenciamento de Nota Fiscal</p>
+                            ${uploadButtonHtml}
+                        </div>`;
+                }
+
+                paymentSection = ` 
+                    <div class="mb-8 mt-6"> 
+                        <div class="flex justify-between items-center mb-4 pb-2 border-b border-gray-200"><h4 class="font-bold text-gray-800 text-lg">Receitas</h4><button onclick="openPaymentForm('clientPayments', '${project.id}')" class="text-xs bg-green-600 text-white font-bold px-3 py-1.5 rounded hover:bg-green-700 transition uppercase tracking-wide">+ Adicionar</button></div> ${project.clientPayments.map(p => { const link = p.receiptLink ? `<a href="${p.receiptLink}" target="_blank" class="text-blue-600 hover:underline ml-2 text-xs">Ver Comprovante</a>` : ''; return `<div class="border-l-4 border-green-500 bg-white p-3 rounded shadow-sm mb-2 flex justify-between items-center"><div><span class="font-bold text-gray-800">${formatCurrency(parseFloat(p.amount))}</span><span class="text-sm text-gray-500 ml-2">(${p.description || 'Receita'} - ${p.method})</span>${link}</div><div class="flex space-x-2"><button onclick="openPaymentForm('clientPayments', '${project.id}', '${p.id}')" class="text-gray-400 hover:text-blue-600 text-sm" title="Editar"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button><button onclick="deletePayment('${p.id}', 'clientPayments')" class="text-gray-400 hover:text-red-600 text-sm" title="Excluir"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div></div>`; }).join('') || '<p class="text-gray-400 text-sm italic text-center py-4">Nenhuma receita.</p>'} </div>`; 
+            }
+            document.getElementById('detail-project-content').innerHTML = ` 
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center bg-gray-50 p-6 rounded-xl border border-gray-200 mb-8 shadow-inner">
+                    <div><p class="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">Orçado</p><p class="font-bold text-xl text-gray-800">${formatCurrency(f.budgetedValue)}</p></div>
+                    <div><p class="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">Recebido</p><p class="font-bold text-xl text-green-600">${formatCurrency(f.received)}</p></div>
+                    <div><p class="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">Despesas</p><p class="font-bold text-xl text-red-600">${formatCurrency(f.expenses)}</p></div>
+                    <div><p class="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">Saldo</p><p class="font-bold text-xl ${f.balance >= 0 ? 'text-blue-600' : 'text-red-600'}">${formatCurrency(f.balance)}</p></div>
+                </div> 
+                ${invoiceHtml} 
+                ${paymentSection} 
+                <div>
+                    <div class="flex justify-between items-center mb-4 pb-2 border-b border-gray-200"><h4 class="font-bold text-gray-800 text-lg">Despesas</h4><button onclick="openPaymentForm('operationalPayments', '${project.id}')" class="text-xs bg-red-600 text-white font-bold px-3 py-1.5 rounded hover:bg-red-700 transition uppercase tracking-wide">+ Adicionar</button></div>
+                    ${project.operationalPayments.map(p => { const link = p.receiptLink ? `<a href="${p.receiptLink}" target="_blank" class="text-blue-600 hover:underline ml-2 text-xs">Ver Comprovante</a>` : ''; return `<div class="border-l-4 border-red-500 bg-white p-3 rounded shadow-sm mb-2 flex justify-between items-center"><div><span class="font-bold text-gray-800">${formatCurrency(parseFloat(p.amount))}</span><span class="text-sm text-gray-500 ml-2">(${p.description || 'Despesa'} - ${p.method})</span>${link}</div><div class="flex space-x-2"><button onclick="openPaymentForm('operationalPayments', '${project.id}', '${p.id}')" class="text-gray-400 hover:text-blue-600 text-sm" title="Editar"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button><button onclick="deletePayment('${p.id}', 'operationalPayments')" class="text-gray-400 hover:text-red-600 text-sm" title="Excluir"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div></div>`; }).join('') || '<p class="text-gray-400 text-sm italic text-center py-4">Nenhuma despesa.</p>'}</div>`; };
+        // CORREÇÃO V12: Atualiza generateAccountingReportPDF para usar os dados do cabeçalho das configurações
+        window.generateAccountingReportPDF = () => { 
+            const settings = window.appSettings;
+            const selectedIds = Array.from(document.querySelectorAll('.project-checkbox:checked')).map(cb => cb.value); 
+            if (!selectedIds.length) return alertUser("Selecione projetos.", 'red'); 
+            document.getElementById('proposal-content-print-area').innerHTML = ''; 
+            const monthFilter = document.getElementById('accounting-month-filter').value; 
+            const projectReportGroups = {}; 
+            const processedGroupedPayments = new Set(); 
+            let tIn=0, tOut=0; 
+            const allFinancialEvents = []; 
+            
+            window.currentProjects.filter(p => selectedIds.includes(p.id)).forEach(p => { 
+                p.operationalPayments.forEach(pay => { 
+                    const event = { type: 'expense', date: pay.date, amount: parseFloat(pay.amount), data: pay, projectId: p.id, clientName: clientsCache[p.clientId]?.name, isGrouped: false }; 
+                    if (!monthFilter || pay.date.startsWith(monthFilter)) { 
+                        allFinancialEvents.push(event); 
+                        tOut += parseFloat(pay.amount) || 0; 
+                    } 
+                }); 
+                if (p.groupedPaymentId && p.groupedPayment) { 
+                    if (!processedGroupedPayments.has(p.groupedPaymentId)) { 
+                        const group = p.groupedPayment; 
+                        const event = { type: 'grouped_payment_revenue', date: group.date, amount: parseFloat(group.amount), data: group, groupedPaymentId: p.groupedPaymentId, clientName: clientsCache[p.clientId]?.name, allRelatedProjects: window.currentProjects.filter(proj => proj.groupedPaymentId === p.groupedPaymentId), totalBudgeted: window.currentProjects .filter(proj => proj.groupedPaymentId === p.groupedPaymentId) .reduce((sum, proj) => sum + calculateProjectValues(proj).budgetedValue, 0), isGrouped: true }; 
+                        if (!monthFilter || group.date.startsWith(monthFilter)) { 
+                            allFinancialEvents.push(event); 
+                            tIn += parseFloat(group.amount) || 0; 
+                            processedGroupedPayments.add(p.groupedPaymentId); 
+                        } 
+                    } 
+                } else { 
+                    p.clientPayments.forEach(pay => { 
+                        const event = { type: 'individual_revenue', date: pay.date, amount: parseFloat(pay.amount), data: pay, projectId: p.id, projectName: p.title, projectDate: p.projectDate, clientName: clientsCache[p.clientId]?.name, isGrouped: false }; 
+                        if (!monthFilter || pay.date.startsWith(monthFilter)) { 
+                            allFinancialEvents.push(event); 
+                            tIn += parseFloat(pay.amount) || 0; 
+                        } 
+                    }); 
+                } 
+            }); 
+            allFinancialEvents.forEach(event => { 
+                let key = event.projectId || event.groupedPaymentId; 
+                if (!key) return; 
+                let groupKey = event.isGrouped ? `GROUP-${key}` : `PROJ-${key}`; 
+                if (!projectReportGroups[groupKey]) { 
+                    let projectRef = window.currentProjects.find(p => p.id === event.projectId); 
+                    if (!projectRef && event.isGrouped) { 
+                        projectRef = event.allRelatedProjects[0]; 
+                    } 
+                    projectReportGroups[groupKey] = { title: event.isGrouped ? event.data.groupName || 'Pagamento Consolidado' : projectRef.title, clientName: event.clientName, projectDate: projectRef ? projectRef.projectDate : null, isGroup: event.isGroup, events: [], totalRevenue: 0, totalExpense: 0 }; 
+                } 
+                projectReportGroups[groupKey].events.push(event); 
+                if (event.type === 'grouped_payment_revenue' || event.type === 'individual_revenue') { 
+                    projectReportGroups[groupKey].totalRevenue += event.amount; 
+                } else if (event.type === 'expense') { 
+                    projectReportGroups[groupKey].totalExpense += event.amount; 
+                } 
+            }); 
+            const sortedGroupKeys = Object.keys(projectReportGroups).sort((a, b) => projectReportGroups[a].title.localeCompare(b.title) ); 
+            const logoSrc = settings.logoUrl || DEFAULT_LOGO; 
+            const now = new Date(); 
+            const months = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']; 
+            const day = String(now.getDate()).padStart(2, '0'); // V25: CORREÇÃO: Adicionada a declaração da variável 'day'.
+            const dateStr = `São Paulo, ${day} de ${months[now.getMonth()]} de ${now.getFullYear()}`; 
+            let reportTitle = "RELATÓRIO CONTÁBIL"; 
+            if(monthFilter) { 
+                const [year, month] = monthFilter.split('-'); 
+                const monthLabel = months[parseInt(month) - 1]; 
+                reportTitle = `RELATÓRIO CONTÁBIL - ${monthLabel.toUpperCase()} ${year}`; 
+            } 
+            
+            // NOVO V12: Uso dos campos de configuração no cabeçalho
+            let html = ` 
+                 <div class="p-8 bg-white text-gray-900 font-sans max-w-4xl mx-auto"> 
+                     <div class="flex justify-between items-start mb-8 border-b border-gray-200 pb-6"> 
+                         <div class="w-1/2"> 
+                             <img src="${logoSrc}" class="h-16 mb-3 object-contain" alt="Logo"> 
+                             <p class="text-[10px] uppercase font-bold tracking-[0.2em] text-gray-500 mb-4">${settings.headerSlogan || 'SLOGAN DA EMPRESA'}</p> 
+                             <div class="text-xs text-gray-600 space-y-1 font-medium leading-snug"> 
+                                 <p class="font-bold text-gray-900 text-sm">${settings.headerTitle || 'Nome da Sua Empresa'}</p> 
+                                 <p>${settings.headerDocument || 'CNPJ NÃO INFORMADO'}</p> 
+                                 <p>${settings.headerSocial || ''}</p> 
+                                 <p class="mt-2">${settings.headerPhone1 || ''} | ${settings.headerPhone2 || ''}</p> 
+                                 <p>${settings.headerEmail || ''}</p> 
+                             </div> 
+                         </div> 
+                         <div class="w-1/2 text-right"> 
+                             <h2 class="text-2xl font-bold text-gray-900 mb-1 tracking-tight">${reportTitle}</h2> 
+                             <p class="text-sm text-gray-500 mb-8 font-medium">${dateStr}</p> 
+                             <div class="text-sm text-right space-y-1"> 
+                                 <p class="font-extrabold uppercase text-gray-900 text-base mb-1">Resumo Financeiro</p> 
+                                 <p class="text-xs text-gray-500 uppercase font-medium tracking-wide">Projetos Selecionados</p> 
+                             </div> 
+                         </div> 
+                     </div> `; 
+            
+            sortedGroupKeys.forEach(key => { 
+                const group = projectReportGroups[key]; 
+                group.events.sort((a, b) => new Date(a.date) - new Date(b.date)); 
+                const projectDateStr = group.isGroup ? '' : formatDateForDisplay(group.projectDate); 
+                html += `<div class="report-month-header mt-10">${group.title.toUpperCase()} (${group.clientName}) ${group.isGroup ? ' - PAGAMENTO CONSOLIDADO' : ''}</div>`; 
+                if (!group.isGroup) { 
+                    html += `<p class="text-sm text-gray-600 font-bold mb-4">Data de Início do Projeto: ${projectDateStr}</p>`; 
+                } 
+                html += `<div class="mb-8 border border-gray-300 rounded-lg overflow-hidden break-inside-avoid shadow-sm">`; 
+                html += ` <table class="report-table"> <thead> <tr> <th colspan="4" class="p-2 border-r border-b border-gray-300 text-left bg-gray-200 text-sm">DETALHE DAS TRANSAÇÕES</th> </tr> <tr> <th class="p-2 border-r border-b border-gray-300 text-center w-24">DATA PGTO.</th> <th class="p-2 border-r border-b border-gray-300 text-left w-1/4">TIPO DE TRANSAÇÃO</th> <th class="p-2 border-r border-b border-gray-300 text-left w-1/4">DESCRIÇÃO / FORNECEDOR</th> <th class="p-2 border-b border-gray-300 text-right w-36">VALOR</th> </tr> </thead> <tbody> `; 
+                let revenueHtml = ''; 
+                let expenseHtml = ''; 
+                group.events.forEach(event => { 
+                    let typeLabel = ''; 
+                    let description = ''; 
+                    let files = ''; 
+                    let amount = formatCurrency(event.amount); 
+                    let rowClass = ''; 
+                    if (event.type === 'grouped_payment_revenue') { 
+                        const gp = event.data; 
+                        const groupDescription = gp.groupName || 'Pagamento Consolidado'; 
+                        typeLabel = `<span class="font-bold text-purple-700">Receita Consolidada (#${gp.id})</span>`; 
+                        description = `<span class="text-xs text-gray-600">${gp.method} - ${gp.description || ''}</span>`; 
+                        files = (gp.invoice_file ? `<a href="${gp.invoice_file}" target="_blank" class="text-blue-600 hover:underline ml-1">NF</a>` : '') + (gp.receipt_link ? `<a href="${gp.receipt_link}" target="_blank" class="text-blue-600 hover:underline ml-1">Comp.</a>` : ''); 
+                        amount = `+ ${amount}`; 
+                        rowClass = 'bg-purple-50 text-purple-800'; 
+                        revenueHtml += ` <tr class="${rowClass}"> <td class="p-2 border-r border-gray-300 text-center font-bold align-top">${new Date(event.date).toLocaleDateString()}</td> <td class="p-2 border-r border-gray-300 text-left align-top">${typeLabel}</td> <td class="p-2 border-r border-gray-300 text-left align-top">${description} ${files}</td> <td class="p-2 border-gray-300 text-right font-extrabold align-top">${amount}</td> </tr> `; 
+                        const relatedProjectsList = event.allRelatedProjects 
+                            .filter(p => selectedIds.includes(p.id)) 
+                            .map(p => `<li>${p.title} (${formatDateForDisplay(p.projectDate)}) - Orçado ${formatCurrency(calculateProjectValues(p).budgetedValue)}</li>`) 
+                            .join(''); 
+                        if(relatedProjectsList) { 
+                            revenueHtml += ` <tr class="bg-purple-50"> <td colspan="4" class="p-2 border-r border-gray-300 text-left text-xs italic text-gray-600"> <span class="font-bold">Projetos Relacionados no Grupo:</span> <ul class="list-disc list-inside ml-4">${relatedProjectsList}</ul> </td> </tr> `; 
+                        } 
+                    } else if (event.type === 'individual_revenue') { 
+                        const pay = event.data; 
+                        typeLabel = `Receita Individual`; 
+                        description = `<span class="text-xs text-gray-600">${pay.method} - ${pay.description || 'Receita Individual'}</span>`; 
+                        files = (pay.receipt_link ? `<a href="${pay.receipt_link}" target="_blank" class="text-blue-600 hover:underline ml-1">Comp.</a>` : ''); 
+                        amount = `+ ${amount}`; 
+                        rowClass = 'bg-green-50 text-green-800'; 
+                        revenueHtml += ` <tr class="${rowClass}"> <td class="p-2 border-r border-gray-300 text-center font-bold align-top">${new Date(event.date).toLocaleDateString()}</td> <td class="p-2 border-r border-gray-300 text-left align-top">${typeLabel}</td> <td class="p-2 border-r border-gray-300 text-left align-top">${description} ${files}</td> <td class="p-2 border-gray-300 text-right font-extrabold align-top">${amount}</td> </tr> `; 
+                    } else if (event.type === 'expense') { 
+                        const pay = event.data; 
+                        const supName = suppliersCache[pay.supplierId]?.name || 'Fornecedor Desconhecido'; 
+                        typeLabel = `Despesa Operacional`; 
+                        description = `<span class="text-xs text-gray-600">${pay.method} - ${pay.description || 'Despesa Operacional'} (${supName})</span>`; 
+                        files = (pay.receipt_link ? `<a href="${pay.receipt_link}" target="_blank" class="text-blue-600 hover:underline ml-1">Comp.</a>` : ''); 
+                        amount = `- ${amount}`; 
+                        rowClass = 'bg-red-50 text-red-800'; 
+                        expenseHtml += ` <tr class="${rowClass}"> <td class="p-2 border-r border-gray-300 text-center font-bold align-top">${new Date(event.date).toLocaleDateString()}</td> <td class="p-2 border-r border-b border-gray-300 text-left align-top">${typeLabel}</td> <td class="p-2 border-r border-b border-gray-300 text-left align-top">${description} ${files}</td> <td class="p-2 border-b border-gray-300 text-right font-extrabold align-top">${amount}</td> </tr> `; 
+                    } 
+                }); 
+                html += (revenueHtml.length ? `<tr><td colspan="4" class="bg-green-100 font-bold text-xs text-green-800 uppercase tracking-wide p-1">ENTRADAS (RECEBIMENTOS)</td></tr>${revenueHtml}` : '') + (expenseHtml.length ? `<tr><td colspan="4" class="bg-red-100 font-bold text-xs text-red-800 uppercase tracking-wide p-1">SAÍDAS (DESPESAS OPERACIONAIS)</td></tr>${expenseHtml}` : ''); 
+                const projectNet = group.totalRevenue - group.totalExpense; 
+                html+=`</tbody> <tfoot> <tr class="bg-gray-100 font-bold"> <td colspan="3" class="text-right text-gray-800 text-sm">TOTAL LÍQUIDO DO PROJETO:</td> <td class="text-right ${projectNet>=0?'text-blue-700':'text-red-700'} text-lg">${formatCurrency(projectNet)}</td> </tr> </tfoot> </table> </div>`; 
+            }); 
+            html+=` <div class="mt-8 p-6 border-2 border-gray-800 rounded-lg bg-white break-inside-avoid shadow-md"> <h3 class="font-bold text-xl mb-4 border-b border-gray-200 pb-2 text-gray-900">Resumo Geral</h3> <table class="w-full text-base"> <tr><td class="py-2 text-gray-600">Total Entradas:</td><td class="text-right font-bold text-green-700 text-lg">${formatCurrency(tIn)}</td></tr> <tr><td class="py-2 text-gray-600">Total Saídas:</td><td class="text-right font-bold text-red-700 text-lg">${formatCurrency(tOut)}</td></tr> <tr class="text-xl border-t border-gray-300"><td class="py-3 font-bold text-gray-900">Resultado:</td><td class="text-right font-bold py-3 ${tIn-tOut>=0?'text-blue-700':'text-red-700'}">${formatCurrency(tIn-tOut)}</td></tr> </table> </div> </div>`; 
+            document.getElementById('report-print-view').innerHTML = html; 
+            window.print(); 
+        };
+
+        // CORREÇÃO V24/V26: Função renderAccountingProjectSelector atualizada para remover a entrada duplicada do 'Selecionar Tudo' no scroll-content.
+        window.renderAccountingProjectSelector = (projects) => { 
+            const monthFilter = document.getElementById('accounting-month-filter').value; 
+            const filtered = monthFilter ? projects.filter(p => (p.projectDate || '').startsWith(monthFilter)) : projects; 
+            const c = document.getElementById('accounting-project-selector'); 
+            
+            if (filtered.length === 0) { 
+                // CORREÇÃO V26: Garante que, mesmo vazio, o sticky header existe para a checkbox 'Selecionar Tudo'
+                let emptyHtml = `
+                    <div class="sticky-header">
+                        <div class="flex items-center space-x-3 opacity-50">
+                            <input type="checkbox" id="toggle-all-projects" disabled class="h-5 w-5 theme-text rounded"> 
+                            <label for="toggle-all-projects" class="text-sm font-bold text-gray-700">Selecionar Tudo</label> 
+                        </div>
+                    </div>
+                    <div class="scroll-content">
+                        <p class="text-gray-500 text-center py-4">Nenhum projeto encontrado.</p>
+                    </div>`;
+                c.innerHTML = emptyHtml;
+                return; 
+            } 
+            
+            const groups = {}; 
+            filtered.forEach(p => { 
+                let dStr = p.projectDate; 
+                if(!dStr) dStr = new Date().toISOString().split('T')[0]; 
+                const dateObj = new Date(dStr); 
+                dateObj.setMinutes(dateObj.getMinutes() + dateObj.getTimezoneOffset()); 
+                const sortKey = dStr.substring(0, 7); 
+                const label = dateObj.toLocaleString('pt-BR', { month: 'long', year: 'numeric' }); 
+                if (!groups[sortKey]) groups[sortKey] = { label: label, items: [] }; 
+                groups[sortKey].items.push(p); 
+            }); 
+            
+            const sortedKeys = Object.keys(groups).sort().reverse(); 
+            
+            // CORREÇÃO V26: Inicializa o HTML apenas com o sticky header de controle geral.
+            let html = `
+                <div class="sticky-header">
+                    <div class="flex items-center space-x-3">
+                        <input type="checkbox" id="toggle-all-projects" onchange="toggleAllProjects(this.checked)" class="h-5 w-5 theme-text rounded"> 
+                        <label for="toggle-all-projects" class="text-sm font-bold text-gray-700 cursor-pointer">Selecionar Tudo</label> 
+                    </div>
+                </div>
+                <div class="scroll-content">`;
+            
+            sortedKeys.forEach(key => { 
+                const g = groups[key]; 
+                html += ` 
+                    <div class="mt-4 mb-2"> 
+                        <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 pb-1 mb-2 flex items-center"> 
+                            ${g.label} 
+                        </h4> 
+                        <div class="space-y-2"> 
+                `; 
+                g.items.forEach(p => { 
+                    const f = calculateProjectValues(p); 
+                    const isGrouped = p.groupedPaymentId !== null; 
+                    const groupBadge = isGrouped ? '<span class="text-[10px] bg-purple-200 text-purple-800 font-bold px-1 rounded ml-1">GRUPO</span>' : ''; 
+                    
+                    html += ` 
+                        <div class="flex items-center space-x-3 bg-white p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition"> 
+                            <input type="checkbox" value="${p.id}" id="proj-cb-${p.id}" class="project-checkbox h-5 w-5 theme-text rounded"> 
+                            <label for="proj-cb-${p.id}" class="text-sm text-gray-800 flex-1 cursor-pointer flex justify-between"> 
+                                <span class="font-bold">${p.title}${groupBadge}</span> 
+                                <span class="text-xs font-bold bg-gray-100 px-2 py-0.5 rounded text-gray-600">${formatCurrency(f.balance)}</span> 
+                            </label> 
+                        </div>`; 
+                }); 
+                html += `</div></div>`; 
+            }); 
+            
+            html += `</div>`; // Fecha a div.scroll-content
+            c.innerHTML = html; 
+        };
+
+        window.toggleAllProjects = (checked) => document.querySelectorAll('.project-checkbox').forEach(c => c.checked = checked);
+        // CORREÇÃO V12: Atualiza openProposalView para usar os dados do cabeçalho das configurações
+        window.openProposalView = (quoteId) => { 
+            const settings = window.appSettings;
+            const q = window.currentQuotes.find(x => x.id == quoteId); 
+            if (!q) return alertUser('Orçamento não encontrado.', 'red'); 
+            let client = clientsCache[q.clientId]; 
+            if (!client) { client = { name: 'Cliente não encontrado', document: '-', email: '-' }; } 
+            
+            // CORREÇÃO v11: Uso dos novos campos
+            const validityDays = q.validityDays || 15;
+            const discountPercent = q.discountPercent || 10.00;
+            const downPaymentPercent = q.downPaymentPercent || 40.00;
+            const installmentsCount = q.installmentsCount || 12;
+            const proposalObs = q.proposalObs || '';
+            
+            window.currentQuoteId = quoteId; 
+            const f = calculateProjectValues(q); 
+            const total = f.budgetedValue; 
+            document.getElementById('report-print-view').innerHTML = ''; 
+            
+            // Cálculo financeiro do Orçamento com base nos campos do Quote
+            const aVista = total * (1 - (discountPercent / 100));
+            const entrada = total * (downPaymentPercent / 100);
+            const saldo = total - entrada;
+            const parcela = installmentsCount > 0 ? saldo / installmentsCount : saldo; // Evita divisão por zero
+            
+            const months = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']; 
+            const now = new Date(); 
+            const day = String(now.getDate()).padStart(2, '0'); 
+            const dateStr = `São Paulo, ${day} de ${months[now.getMonth()]} de ${now.getFullYear()}`; 
+            const logoSrc = settings.logoUrl || DEFAULT_LOGO; 
+            
+            const items = q.serviceItems.map((i, idx) => ` <tr class="text-sm border-b border-gray-300 last:border-b-0"> <td class="p-2 text-center text-gray-700 border-r border-gray-300 w-16 align-top">${(idx+1).toString().padStart(2,'0')}</td> <td class="p-2 border-r border-b border-gray-300 font-bold text-gray-800 uppercase align-top">${i.description}</td> <td class="p-2 border-r border-b border-gray-300 text-center w-20 align-top">${i.quantity.toString().padStart(2,'0')}</td> <td class="p-2 border-b border-gray-300 text-right font-bold text-gray-900 w-36 align-top">${formatCurrency(parseFloat(i.totalValue))}</td> </tr>`).join(''); 
+            
+            // NOVO V12: Uso dos campos de configuração no cabeçalho
+            document.getElementById('proposal-content').innerHTML = ` 
+                <div class="p-8 bg-white text-gray-900 font-sans border border-gray-200 shadow-lg max-w-4xl mx-auto"> 
+                    <div class="flex flex-col sm:flex-row justify-between items-start mb-8"> 
+                        <div class="w-full sm:w-1/2 mb-4 sm:mb-0"> 
+                            <img src="${logoSrc}" class="h-16 mb-3 object-contain" alt="Logo"> 
+                            <p class="text-[10px] uppercase font-bold tracking-[0.2em] text-gray-500 mb-4">${settings.headerSlogan || 'SLOGAN DA EMPRESA'}</p> 
+                            <div class="text-xs text-gray-600 space-y-1 font-medium leading-snug"> 
+                                <p class="font-bold text-gray-900 text-sm">${settings.headerTitle || 'Nome da Sua Empresa'}</p> 
+                                <p>${settings.headerDocument || 'CNPJ NÃO INFORMADO'}</p> 
+                                <p>${settings.headerSocial || ''}</p> 
+                                <p class="mt-2">${settings.headerPhone1 || ''} | ${settings.headerPhone2 || ''}</p> 
+                                <p>${settings.headerEmail || ''}</p> 
+                            </div> 
+                        </div> 
+                        <div class="w-full sm:w-1/2 text-left sm:text-right"> 
+                            <h2 class="text-2xl font-bold text-gray-900 mb-1 tracking-tight">ORÇAMENTO | ${q.id}</h2> 
+                            <p class="text-sm text-gray-500 mb-8 font-medium">${dateStr}</p> 
+                            <div class="text-sm text-right space-y-1"> 
+                                <p class="font-extrabold uppercase text-gray-900 text-base mb-1">${q.title}</p> 
+                                <p class="font-bold uppercase text-gray-800 text-sm">${client.name || 'CLIENTE'}</p> 
+                                <p class="text-xs text-gray-500 uppercase font-medium tracking-wide">${client.document || 'CPF/CNPJ NÃO INFORMADO'}</p> 
+                                <p class="text-xs text-gray-500 uppercase tracking-wide">${client.email || ''}</p> 
+                            </div> 
+                        </div> 
+                    </div> 
+                    <table class="w-full mb-8 border border-gray-300 text-sm"> 
+                        <thead class="bg-gray-100 text-gray-900 font-extrabold uppercase text-xs tracking-wider"> 
+                            <tr> 
+                                <th class="p-2 border-r border-b border-gray-300 text-center w-16">ITEM</th> 
+                                <th class="p-2 border-r border-b border-gray-300 text-left">DESCRIÇÃO</th> 
+                                <th class="p-2 border-r border-b border-gray-300 text-center w-20">QNTD</th> 
+                                <th class="p-2 border-b border-gray-300 text-right w-36">VALOR</th> 
+                            </tr> 
+                        </thead> 
+                        <tbody>${items}</tbody> 
+                    </table> 
+                    <div class="flex justify-end mb-10"> 
+                        <div class="w-full md:w-5/12"> 
+                            <div class="flex justify-between py-1 border-b border-gray-300 mb-1"> 
+                                <span class="text-xs font-bold uppercase text-gray-500">SUB TOTAL:</span> 
+                                <span class="text-sm font-bold text-gray-800">${formatCurrency(total)}</span> 
+                            </div> 
+                            <div class="flex justify-between py-1 border-b border-gray-300 mb-1"> 
+                                <span class="text-xs font-bold uppercase text-gray-500">FRETE:</span> 
+                                <span class="text-sm font-bold text-gray-800">R$ 0,00</span> 
+                            </div> 
+                            <div class="flex justify-between py-2 mt-1"> 
+    <span class="text-sm font-extrabold uppercase text-gray-900">TOTAL:</span> 
+    <span class="text-lg font-extrabold text-[#C62222]">${formatCurrency(total)}</span> 
+</div>
+ 
+                        </div> 
+                    </div> 
+                    <div class="text-xs text-gray-700 space-y-6 border-t border-gray-300 pt-6"> 
+                        <p class="leading-relaxed"> 
+                            <strong class="text-gray-900">OBS.:</strong> ${proposalObs} 
+                        </p> 
+                        <p class="font-bold text-gray-900 uppercase tracking-wide text-sm">PROPOSTA VÁLIDA POR ${validityDays} DIAS</p> 
+                        <div class=""> 
+                            <p class="font-bold mb-2 uppercase text-gray-900 text-sm">OPÇÕES DE PAGAMENTO:</p> 
+                            <ol class="list-decimal list-inside space-y-2 ml-1 font-medium text-gray-800"> 
+                                <li>Valor a vista (com desconto de ${discountPercent}%): <strong class="text-gray-900">${formatCurrency(aVista)}</strong></li> 
+                                <li>Entrada de <strong class="text-gray-900">${formatCurrency(entrada)}</strong> + ${installmentsCount}x de <strong class="text-gray-900">${formatCurrency(parcela)}</strong></li> 
+                            </ol> 
+                            <p class="text-xs text-gray-500 italic mt-3">Calculado com base em ${downPaymentPercent}% de entrada e ${installmentsCount} parcelas do saldo.</p>
+                        </div> 
+                    </div> 
+                </div>`; 
+            
+            const statusOpts = ['Rascunho', 'Enviado', 'Aprovado', 'Rejeitado', 'Convertido'].map(s => `<option value="${s}" ${q.status===s?'selected':''} ${q.status==='Convertido' && s!=='Convertido' ? 'disabled' : ''}>${s}</option>`).join(''); 
+            let actionsHtml = ` 
+                <div class="flex space-x-3"> 
+                    <button onclick="openProposalView('${q.id}')" class="bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold py-2 px-4 rounded-lg text-sm transition">Visualizar</button> 
+                    <button onclick="openQuoteModal('${q.id}')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-4 rounded-lg text-sm transition">Editar/Excluir</button> 
+                </div> 
+                <div class="flex space-x-3 items-center"> 
+                    <span class="text-sm font-bold text-gray-700">Status:</span> 
+                    <select id="quote-status-updater" onchange="updateQuoteStatus('${q.id}', this.value)" class="border border-gray-300 rounded-lg p-2 text-sm bg-white">${statusOpts}</select> 
+                </div> `; 
+            if (q.status === 'Aprovado') { 
+                actionsHtml = ` 
+                    <div class="flex space-x-3"> 
+                        <button onclick="openProposalView('${q.id}')" class="bg-blue-100 hover:bg-blue-200 text-blue-800 font-bold py-2 px-4 rounded-lg text-sm transition">Visualizar</button> 
+                        <button onclick="convertQuoteToProject('${q.id}')" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg text-sm transition">Gerar Projeto</button> 
+                    </div> 
+                    <div class="flex space-x-3 items-center"> 
+                        <span class="text-sm font-bold text-gray-700">Status:</span> 
+                        <select id="quote-status-updater" onchange="updateQuoteStatus('${q.id}', this.value)" class="border border-gray-300 rounded-lg p-2 text-sm bg-white">${statusOpts}</select> 
+                    </div> `; 
+            } else if (q.status === 'Convertido') { 
+                actionsHtml = ` 
+                    <div class="flex space-x-3"> 
+                        <button onclick="openQuoteModal('${q.id}')" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-4 rounded-lg text-sm transition">Detalhes/Excluir</button> 
+                    </div> 
+                    <span class="text-sm font-bold text-purple-600">Orçamento Convertido em Projeto</span> 
+                `; 
+            } 
+            document.getElementById('proposal-actions').innerHTML = actionsHtml; 
+            document.getElementById('proposal-content-print-area').innerHTML = document.getElementById('proposal-content').innerHTML; 
+            document.getElementById('proposal-modal').classList.remove('hidden'); 
+            document.getElementById('proposal-modal').classList.add('flex'); 
+        };
+        window.updateQuoteStatus = async (quoteId, newStatus) => { const originalQuote = window.currentQuotes.find(x => x.id == quoteId); if (!originalQuote || originalQuote.status === 'Convertido') { alertUser("Orçamento convertido, status não pode ser alterado.", 'red'); return; } if (!confirm(`Mudar status do Orçamento #${quoteId} para "${newStatus}"?`)) { const select = document.getElementById('quote-status-updater'); if(select) select.value = originalQuote.status; return; } try { 
+            // CORREÇÃO v11: Precisa enviar o payload completo para evitar que campos novos sejam apagados no PUT
+            const payload = { 
+                id: quoteId, 
+                status: newStatus,
+                clientId: originalQuote.clientId,
+                title: originalQuote.title,
+                description: originalQuote.description,
+                executionDate: originalQuote.executionDate,
+                validityDays: originalQuote.validityDays,
+                discountPercent: originalQuote.discountPercent,
+                downPaymentPercent: originalQuote.downPaymentPercent,
+                installmentsCount: originalQuote.installmentsCount,
+                proposalObs: originalQuote.proposalObs
+            };
+            await apiFetch('quotes', 'PUT', payload, quoteId); 
+            await refreshData(); 
+            alertUser(`Status atualizado para: ${newStatus}`, 'green'); 
+            if (newStatus === 'Aprovado') { closeProposalModal(); setTimeout(() => openProposalView(quoteId), 100); } else if (newStatus === 'Convertido') { closeProposalModal(); } } catch (e) { const select = document.getElementById('quote-status-updater'); if(select) select.value = originalQuote.status; } };
+        window.printProposal = () => { window.print(); };
+        window.exportAccountingData = () => { const groupedPayments = {}; window.currentProjects.forEach(p => { if(p.groupedPaymentId) { if(!groupedPayments[p.groupedPaymentId]) { groupedPayments[p.groupedPaymentId] = { group: p.groupedPayment, client: clientsCache[p.clientId]?.name, projects: [] }; } groupedPayments[p.groupedPaymentId].projects.push({ title: p.title, budgetedValue: calculateProjectValues(p).budgetedValue, expenses: calculateProjectValues(p).expenses }); } }); const data = window.currentProjects.map(p => ({ projeto: p.title, cliente: clientsCache[p.clientId]?.name, financeiro: calculateProjectValues(p), isGrouped: p.groupedPaymentId !== null, groupedPaymentId: p.groupedPaymentId })); const output = { individualProjects: data.filter(d => !d.isGrouped), groupedPayments: Object.values(groupedPayments), }; document.getElementById('accounting-data-output').textContent = JSON.stringify(output, null, 2); document.getElementById('accounting-data-output').classList.remove('hidden'); };
+        
+        // Uso inicial
+        window.currentProjectServiceItems = [];
+        window.renderServiceItemsForm = window.renderProjectServiceItemsForm;
+        window.updateBudgetCalculated = window.updateProjectBudgetCalculated;
+        window.updateItemModel = window.updateProjectItemModel;
+        window.addItemToProjectForm = window.addProjectItem;
+        window.removeItem = window.removeProjectItem;
+
+        // INICIALIZAÇÃO SEGURA
+        window.addEventListener('load', () => {
+             // Configuração do botão de configurações
+             window.openSettingsModal = () => { const title = document.getElementById('settings-modal-title'); if (title) title.textContent = 'Configurações do Sistema'; loadSettings(); document.getElementById('settings-modal').classList.remove('hidden'); document.getElementById('settings-modal').classList.add('flex'); };
+             // Inicia carregamento de dados apenas se passar na verificação de auth (que ocorre simultaneamente, mas o refreshData vai falhar 401 se não tiver sessao)
+             loadInitialData();
+        });
+    </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/vcd15cbe7772f49c399c6a5babf22c1241717689176015" integrity="sha512-ZpsOmlRQV6y907TI0dKBHq9Md29nnaEIPlkf84rnaERnq6zvWvPUqr2ft8M1aS28oN72PdrCzSjY4U6VaAw1EQ==" data-cf-beacon='{"version":"2024.11.0","token":"92d59a1803d140c4b70e4a883674fac5","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
